@@ -1,0 +1,180 @@
+use rand::seq::SliceRandom; // Import necessário para o shuffle
+use serde::{Deserialize, Serialize};
+
+// --- ESTRUTURA DAS CARTAS ---
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Naipe {
+    Copas,
+    Ouros,
+    Espadas,
+    Paus,
+    // Para o Joker (Coringa do baralho), o naipe pode ser irrelevante ou "Nenhum"
+    Nenhum,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Valor {
+    As,
+    Dois, // Importante: No Buraco, o 2 é coringa!
+    Tres,
+    Quatro,
+    Cinco,
+    Seis,
+    Sete,
+    Oito,
+    Nove,
+    Dez,
+    Valete,
+    Dama,
+    Rei,
+    Joker, // O Coringão clássico
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Carta {
+    pub naipe: Naipe,
+    pub valor: Valor,
+}
+
+impl Carta {
+    /// Retorna quantos pontos a carta vale na contagem final
+    pub fn pontos(&self) -> i32 {
+        match self.valor {
+            Valor::Joker => 20, // Coringa vale 20 (varia da regra, ajuste se precisar)
+            _ => 10,            // Outras cartas valem 5
+        }
+    }
+
+    /// Verifica se a carta funciona como coringa (2 ou Joker)
+    pub fn eh_coringa(&self) -> bool {
+        matches!(self.valor, Valor::Dois | Valor::Joker)
+    }
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct Baralho {
+    pub cartas: Vec<Carta>,
+}
+
+impl Baralho {
+    /// Cria um baralho novo com 2 jogos completos (Regra do Buraco)
+    pub fn new() -> Self {
+        let mut cartas = Vec::new();
+
+        // Buraco usa 2 baralhos
+        for _ in 0..2 {
+            // Adiciona as cartas normais (A a K)
+            for naipe in [Naipe::Copas, Naipe::Ouros, Naipe::Espadas, Naipe::Paus] {
+                for valor in [
+                    Valor::As,
+                    Valor::Dois,
+                    Valor::Tres,
+                    Valor::Quatro,
+                    Valor::Cinco,
+                    Valor::Seis,
+                    Valor::Sete,
+                    Valor::Oito,
+                    Valor::Nove,
+                    Valor::Dez,
+                    Valor::Valete,
+                    Valor::Dama,
+                    Valor::Rei,
+                ] {
+                    cartas.push(Carta { naipe, valor });
+                }
+            }
+            // Adiciona 2 Jokers por baralho (geralmente)
+            cartas.push(Carta {
+                naipe: Naipe::Nenhum,
+                valor: Valor::Joker,
+            });
+            cartas.push(Carta {
+                naipe: Naipe::Nenhum,
+                valor: Valor::Joker,
+            });
+        }
+
+        Self { cartas }
+    }
+
+    /// Embaralha as cartas no lugar (in-place)
+    pub fn embaralhar(&mut self) {
+        let mut rng = rand::rng();
+        self.cartas.shuffle(&mut rng);
+    }
+
+    /// Tira a carta do topo do baralho (para comprar ou dar as cartas)
+    pub fn comprar(&mut self) -> Option<Carta> {
+        self.cartas.pop()
+    }
+
+    /// Verifica quantas cartas restam
+    pub fn restantes(&self) -> usize {
+        self.cartas.len()
+    }
+}
+// --- PROTOCOLO DE COMUNICAÇÃO (JSON) ---
+
+// O que o servidor manda para os jogadores
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "tipo", content = "dados")] // Isso cria um JSON bonito: { "tipo": "Estado", "dados": {...} }
+pub enum MsgServidor {
+    BoasVindas { id_jogador: u8 },
+    EstadoDoJogo(EstadoJogo),
+    Erro(String),
+}
+
+// O que o jogador manda para o servidor
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "acao", content = "detalhes")]
+pub enum MsgCliente {
+    ComprarBaralho,
+    ComprarLixo,
+    // Exemplo: Baixar ([As, 2, 3], grupos de cartas)
+    BaixarJogos { jogos: Vec<Vec<Carta>> },
+    Descartar { carta: Carta },
+}
+
+// --- ESTADO GLOBAL DO JOGO ---
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+pub struct EstadoJogo {
+    pub baralho: Baralho,
+    pub maos: Vec<Vec<Carta>>,
+    pub turno_atual: u8, // 0 a 3
+    pub lixo: Vec<Carta>,
+    pub lixo_topo: Option<Carta>,      // A carta visível do lixo
+    pub jogos_time_a: Vec<Vec<Carta>>, // Canastras baixadas time A
+    pub jogos_time_b: Vec<Vec<Carta>>, // Canastras baixadas time B
+    pub pontuacao_a: i32,
+    pub pontuacao_b: i32,
+    // Nota: Não enviamos o baralho inteiro nem a mão dos oponentes aqui
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct VisaoJogador {
+    // A mão dele é a única que ele vê de verdade
+    pub minha_mao: Vec<Carta>,
+
+    // Dos outros, ele só precisa saber QUANTAS cartas têm (para desenhar o verso da carta na tela)
+    // Ex: {0: 11, 1: 10, 2: 11, 3: 9}
+    pub qtd_cartas_jogadores: Vec<usize>,
+
+    pub lixo: Vec<Carta>, // O lixo é público (ou só o topo, dependendo da regra)
+    pub jogos_mesa: Vec<Vec<Carta>>, // As canastras baixadas são públicas
+    pub turno_atual: usize,
+    pub cartas_no_monte: usize, // Só o número, nada de lista de cartas!
+}
+
+impl EstadoJogo {
+
+    pub fn new() -> Self {
+        let mut baralho = Baralho::new()
+    }
+
+    /// Cria um recorte seguro do estado para um jogador específico
+    pub fn gerar_visao_para(&self, jogador_alvo_id: usize) -> VisaoJogador {
+        todo!();
+    }
+}

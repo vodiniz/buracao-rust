@@ -1,0 +1,16 @@
+[package]
+name = "buracao_server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Importa nossa biblioteca de lógica local
+buracao_core = { path = "../buracao_core" }
+
+# Utilitários assíncronos e Web
+tokio = { version = "1.0", features = ["full"] }
+axum = "0.8.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"                                    # Para logs
+tracing-subscriber = "0.3"
