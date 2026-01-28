@@ -51,6 +51,10 @@ impl Carta {
         matches!(self.valor, Valor::Dois | Valor::Joker)
     }
 
+    pub fn eh_tres_vermelho(&self) -> bool {
+        self.valor == Valor::Tres && (self.naipe == Naipe::Copas || self.naipe == Naipe::Ouros)
+    }
+
     pub fn valor_numerico_sequencia(&self) -> u8 {
         match self.valor {
             Valor::Quatro => 4,
@@ -159,15 +163,15 @@ pub enum MsgCliente {
 pub struct EstadoJogo {
     pub baralho: Baralho,
     pub maos: Vec<Vec<Carta>>,
-    pub turno_atual: usize, // 0 a 3
+    pub turno_atual: u32, // 0 a 3
     pub lixo: Vec<Carta>,
     pub jogos_time_a: Vec<Vec<Carta>>, // Canastras baixadas time A
     pub jogos_time_b: Vec<Vec<Carta>>, // Canastras baixadas time B
     pub pontuacao_a: i32,
     pub pontuacao_b: i32,
-    pub jogador_pe: usize,
-    pub tres_time_a: Vec<Carta>,
-    pub tres_time_b: Vec<Carta>,
+    pub rodada: u32,
+    pub tres_vermelhos_time_a: Vec<Carta>,
+    pub tres_vermelhos_time_b: Vec<Carta>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -196,9 +200,9 @@ impl EstadoJogo {
             jogos_time_b: Vec::new(),
             pontuacao_a: 0,
             pontuacao_b: 0,
-            jogador_pe: 0,
-            tres_time_a: Vec::new(),
-            tres_time_b: Vec::new(),
+            rodada: 0,
+            tres_vermelhos_time_a: Vec::new(),
+            tres_vermelhos_time_b: Vec::new(),
         }
     }
 
@@ -206,26 +210,166 @@ impl EstadoJogo {
         self.baralho.shuffle();
 
         let mut maos: Vec<Vec<Carta>> = vec![Vec::new(); 4];
-        for _ in 0..15 {
+
+        // REGRA BURACO: Geralmente são 11 cartas por jogador.
+        // O código original tinha 15. Ajustei para 11, mas altere se for uma variante.
+        for _ in 0..11 {
             for mao in &mut maos {
                 if let Some(carta) = self.baralho.comprar() {
                     mao.push(carta);
                 }
             }
         }
+
+        self.maos = maos;
+
+        // --- CORREÇÃO DO ERRO ---
+        // 1. Usamos '0usize..4' para garantir que 'i' seja usize.
+        // 2. Usamos 'self.rodada as usize' para converter o i32 em usize antes de somar.
+        for i in 0usize..4 {
+            let jogador_idx = (self.rodada as usize + i) % 4;
+            self.processar_tres_vermelhos(jogador_idx);
+        }
     }
 
-    fn pontos_para_descer(&self, pontuação_time: i32) -> i32 {
-        if pontuação_time < 2500 {
+    pub fn processar_tres_vermelhos(&mut self, jogador_id: usize) {
+        // Loop para garantir recursividade (se comprar um 3, processa de novo)
+        loop {
+            // Acesso seguro: Drena a mão inteira para separar as cartas
+            // Isso evita conflitos de borrow checker porque a mão fica vazia temporariamente
+            let (novos_tres_vermelhos, resto_da_mao): (Vec<Carta>, Vec<Carta>) = self.maos
+                [jogador_id]
+                .drain(..)
+                .partition(|c| c.eh_tres_vermelho());
+
+            // 1. Devolve as cartas normais para a mão
+            self.maos[jogador_id] = resto_da_mao;
+
+            // 2. Se não achou nenhum 3 vermelho, o trabalho acabou. Sai do loop.
+            if novos_tres_vermelhos.is_empty() {
+                break;
+            }
+
+            // 3. Processa os 3 vermelhos encontrados
+            let qtd_reposicao = novos_tres_vermelhos.len();
+
+            let time_id = jogador_id % 2;
+            if time_id == 0 {
+                self.tres_vermelhos_time_a.extend(novos_tres_vermelhos);
+            } else {
+                self.tres_vermelhos_time_b.extend(novos_tres_vermelhos);
+            }
+
+            // 4. Compra novas cartas para repor
+            for _ in 0..qtd_reposicao {
+                if let Some(carta) = self.baralho.comprar() {
+                    self.maos[jogador_id].push(carta);
+                }
+            }
+
+            // O loop reinicia aqui.
+            // Na próxima iteração, ele vai checar se as NOVAS cartas compradas
+            // também são 3 vermelhos. Se não forem, o 'partition' retorna vazio
+            // e cai no 'break'.
+        }
+
+        self.maos[jogador_id].sort();
+    }
+
+    fn pontos_para_descer(&self, id_jogador: u32) -> i32 {
+        if id_jogador.is_multiple_of(2) {
+            if self.pontuacao_a < 2500 {
+                80
+            } else {
+                100
+            }
+        } else if self.pontuacao_b < 2500 {
             80
         } else {
             100
         }
     }
 
+    pub fn conferir_real(&self, id_jogador: usize) -> bool {
+        // 1. Seleciona o vetor do time correto (sem clonar!)
+        let jogos_do_time = if id_jogador % 2 == 0 {
+            &self.jogos_time_a
+        } else {
+            &self.jogos_time_b
+        };
+
+        // 2. Verifica se ALGUM jogo satisfaz a condição
+        // Condição de Canastra: Tamanho >= 7
+        jogos_do_time.iter().any(|jogo| jogo.len() >= 7)
+    }
+
+    pub fn obter_canastras(&self, id_jogador: usize) -> Vec<&Vec<Carta>> {
+        let jogos_do_time = if id_jogador.is_multiple_of(2) {
+            &self.jogos_time_a
+        } else {
+            &self.jogos_time_b
+        };
+
+        // Filtra e coleta referências
+        let canastras: Vec<&Vec<Carta>> = jogos_do_time
+            .iter()
+            .filter(|jogo| jogo.len() >= 7)
+            .collect();
+
+        canastras
+    }
+
+    pub fn contar_pontos(&mut self) {
+        // --- 1. FASE DE LEITURA (Calcula Time A) ---
+        let mut saldo_a: i32 = 0;
+
+        // Verifica se tem canastra real (limpa)
+        // Note: conferir_real retorna bool, então o borrow morre imediatamente.
+        let tem_canastra_real_a = self.conferir_real(0);
+
+        // Regra dos 3 Vermelhos
+        if tem_canastra_real_a {
+            saldo_a += (self.tres_vermelhos_time_a.len() as i32) * 100;
+        } else {
+            // Regra Comum: Se não tem canastra limpa, os 3 vermelhos valem NEGATIVO
+            saldo_a -= (self.tres_vermelhos_time_a.len() as i32) * 100;
+        }
+
+        // Pega as canastras (Inicia o borrow de leitura)
+        let canastras_a = self.obter_canastras(0);
+
+        for canastra in canastras_a {
+            // Verifica coringa usando iterador na canastra (sem acessar self)
+            let tem_coringa = canastra.iter().any(|c| c.eh_coringa());
+
+            if tem_coringa {
+                saldo_a += 100; // Canastra Suja (geralmente vale menos, ex: 100)
+            } else {
+                saldo_a += 200; // Canastra Limpa (geralmente vale mais, ex: 200)
+                                // Nota: Se for Canastra Real (A a A) ou de 1000, ajuste aqui.
+            }
+
+            // SOMA PONTOS DAS CARTAS INDIVIDUAIS TAMBÉM?
+            // No Buraco, além do prêmio da canastra, soma-se o valor de cada carta.
+            let soma_cartas: i32 = canastra.iter().map(|c| c.pontos()).sum();
+            saldo_a += soma_cartas;
+        }
+        // FIM DO ESCOPO DE 'canastras_a'. O borrow de leitura morre aqui.
+
+        // --- 2. FASE DE ESCRITA (Atualiza o Self) ---
+
+        // Agora o self está livre para ser modificado!
+        self.pontuacao_a += saldo_a;
+
+        // --- Repita a lógica para o Time B ---
+        // (Pode criar uma função auxiliar privada 'calcular_parcial(id_time)' para não duplicar código)
+    }
+
+    fn batida(&mut self, id_jogador: u32) {}
+
     pub fn tentar_comprar_lixo(
         &mut self,
-        jogador_id: usize,
+        jogador_id: u32,
         jogos_propostos: Vec<Vec<Carta>>,
     ) -> Result<(), String> {
         // --- 1. VALIDAÇÕES BÁSICAS ---
@@ -256,7 +400,7 @@ impl EstadoJogo {
 
         for (i, jogo) in jogos_propostos.iter().enumerate() {
             // Usa aquela função 'validar_sequencia' que criamos antes
-            if !validar_sequencia(jogo) {
+            if !validar_jogo(jogo) {
                 return Err(format!(
                     "O jogo número {} enviado é inválido (não é sequência).",
                     i + 1
@@ -275,12 +419,7 @@ impl EstadoJogo {
         let ja_abriu = !jogos_do_time.is_empty();
 
         if !ja_abriu {
-            let pontuacao_atual = if time_id == 0 {
-                self.pontuacao_a
-            } else {
-                self.pontuacao_b
-            };
-            let minimo_necessario = self.pontos_para_descer(pontuacao_atual); // 30, 80 ou 100
+            let minimo_necessario = self.pontos_para_descer(jogador_id); // 30, 80 ou 100
 
             // Soma pontos de TODAS as cartas de TODOS os jogos propostos
             let total_pontos: i32 = jogos_propostos
@@ -301,15 +440,18 @@ impl EstadoJogo {
         // A. Move TODO o lixo para a mão do jogador primeiro.
         // Isso facilita a lógica de remoção depois (evita erro de "carta não encontrada" se ele usar a do lixo).
         let mut lixo_inteiro: Vec<Carta> = self.lixo.drain(..).collect();
-        self.maos[jogador_id].append(&mut lixo_inteiro);
+        self.maos[jogador_id as usize].append(&mut lixo_inteiro);
 
         // B. Remove as cartas usadas da mão e coloca na mesa
         for jogo in jogos_propostos {
             // Remove da mão
             for carta_jogo in &jogo {
                 // Procura a carta na mão e remove a primeira ocorrência
-                if let Some(pos) = self.maos[jogador_id].iter().position(|c| c == carta_jogo) {
-                    self.maos[jogador_id].remove(pos);
+                if let Some(pos) = self.maos[jogador_id as usize]
+                    .iter()
+                    .position(|c| c == carta_jogo)
+                {
+                    self.maos[jogador_id as usize].remove(pos);
                 } else {
                     // Isso teoricamente nunca deve acontecer se o frontend e as validações estiverem certos,
                     // mas em Rust seguro vale a pena tratar ou dar panic controlado.
@@ -329,9 +471,135 @@ impl EstadoJogo {
         }
 
         // Opcional: Reordenar a mão do jogador após a bagunça
-        self.maos[jogador_id].sort();
+        self.maos[jogador_id as usize].sort();
 
         Ok(())
+    }
+
+    pub fn descer(
+        &mut self,
+        id_jogador: u32,
+        jogos_propostos: Vec<Vec<Carta>>,
+    ) -> Result<(), String> {
+        // --- 1. VALIDAÇÃO DE TURNO ---
+        if self.turno_atual != id_jogador {
+            return Err("Não é a sua vez de jogar.".to_string());
+        }
+
+        if jogos_propostos.is_empty() {
+            return Err("Nenhum jogo foi enviado.".to_string());
+        }
+
+        // --- 2. VALIDAÇÃO DE POSSE (O jogador tem essas cartas?) ---
+        // Para garantir que ele não está usando a mesma carta da mão em dois jogos diferentes
+        // ou usando cartas que não tem, vamos clonar a mão e simular a remoção.
+        let mut mao_simulada = self.maos[id_jogador as usize].clone();
+
+        for jogo in &jogos_propostos {
+            for carta_necessaria in jogo {
+                // Tenta encontrar a carta na mão simulada
+                if let Some(pos) = mao_simulada.iter().position(|c| c == carta_necessaria) {
+                    mao_simulada.remove(pos);
+                } else {
+                    return Err(format!(
+                        "Você não possui a carta {:?} de {:?} necessária (ou está tentando usá-la duas vezes).",
+                        carta_necessaria.valor, carta_necessaria.naipe
+                    ));
+                }
+            }
+        }
+
+        // --- 3. VALIDAÇÃO DE REGRAS DOS JOGOS ---
+        for (i, jogo) in jogos_propostos.iter().enumerate() {
+            if !validar_jogo(jogo) {
+                return Err(format!(
+                    "O jogo número {} não é uma sequência ou trinca válida.",
+                    i + 1
+                ));
+            }
+        }
+
+        // --- 4. VALIDAÇÃO DE ABERTURA (PONTUAÇÃO) ---
+        let time_id = id_jogador % 2; // 0 ou 1
+
+        // Pega a referência dos jogos do time correto
+        let jogos_na_mesa = if time_id == 0 {
+            &self.jogos_time_a
+        } else {
+            &self.jogos_time_b
+        };
+        let ja_abriu = !jogos_na_mesa.is_empty();
+
+        if !ja_abriu {
+            // Calcula pontos de TODOS os jogos propostos nesta jogada
+            let total_pontos_jogada: i32 = jogos_propostos
+                .iter()
+                .map(|jogo| jogo.iter().map(|c| c.pontos()).sum::<i32>())
+                .sum();
+
+            let pontuacao_time = if time_id == 0 {
+                self.pontuacao_a
+            } else {
+                self.pontuacao_b
+            };
+            let minimo = self.pontos_para_descer(id_jogador);
+
+            if total_pontos_jogada < minimo {
+                return Err(format!(
+                    "Pontuação insuficiente para abrir. Necessário: {}, Seus Jogos: {}",
+                    minimo, total_pontos_jogada
+                ));
+            }
+        }
+
+        // --- 5. EXECUÇÃO (Se chegou aqui, está tudo certo!) ---
+
+        // A. Remove as cartas da mão REAL do jogador
+        for jogo in &jogos_propostos {
+            for carta in jogo {
+                // Unwrap é seguro aqui porque já validamos na "simulação" (passo 2)
+                let pos = self.maos[id_jogador as usize]
+                    .iter()
+                    .position(|c| c == carta)
+                    .unwrap();
+                self.maos[id_jogador as usize].remove(pos);
+            }
+        }
+
+        // B. Adiciona os jogos na mesa
+        if time_id == 0 {
+            self.jogos_time_a.extend(jogos_propostos);
+        } else {
+            self.jogos_time_b.extend(jogos_propostos);
+        }
+
+        // --- 6. CHECK DE "BATIDA EM DIRETO" ---
+        // Se o jogador baixou todas as cartas e ficou sem nada na mão,
+        // ele pega o morto IMEDIATAMENTE e continua jogando (sem descarte).
+        if self.maos[id_jogador as usize].is_empty() {
+            // Função que implementaremos a seguir para pegar o morto
+            self.batida(id_jogador);
+        }
+
+        Ok(())
+    }
+
+    pub fn comprar_carta(&mut self, id_jogador: usize) {
+        let carta = self.baralho.comprar();
+        if let Some(c) = carta {
+            self.maos[id_jogador].push(c);
+            self.processar_tres_vermelhos(id_jogador);
+        }
+    }
+
+    pub fn descartar_lixo(&mut self, id_jogador: usize, carta_descarte: &Carta) {
+        if let Some(idx) = self.maos[id_jogador]
+            .iter()
+            .position(|c| c == carta_descarte)
+        {
+            let carta = self.maos[id_jogador].remove(idx);
+            self.lixo.push(carta);
+        }
     }
 
     /// Cria um recorte seguro do estado para um jogador específico
@@ -342,14 +610,17 @@ impl EstadoJogo {
 
 #[derive(Deserialize, Serialize, Debug)]
 pub enum AcaoJogador {
-    // ... outras ações
+    ComprarBaralho,
+    Descer {
+        jogos: Vec<Vec<Carta>>,
+    },
     ComprarLixo {
         // As cartas QUE ESTÃO NA MÃO do jogador e serão usadas junto com a do topo
         cartas_para_descer: Vec<Carta>,
     },
 }
 
-pub fn validar_sequencia(cartas: &[Carta]) -> bool {
+pub fn validar_jogo(cartas: &[Carta]) -> bool {
     // Regra 1: Mínimo de 3 cartas
     if cartas.len() < 3 {
         return false;
@@ -367,62 +638,77 @@ pub fn validar_sequencia(cartas: &[Carta]) -> bool {
         }
     }
 
-    // Regra Buraco: Máximo 1 coringa por sequência
+    // Regra Buraco: Máximo 1 coringa por jogo (seja sequência ou trinca)
     if coringas_count > 1 {
         return false;
     }
 
-    // --- PASSO B: VALIDAR NAIPE ---
-    // Pega o naipe da primeira carta natural como referência
+    // Se só tem coringas, é inválido
+    if naturais.is_empty() {
+        return false;
+    }
+
+    // --- BIFURCAÇÃO: TRINCA DE ASES VS SEQUÊNCIA ---
+
+    // Verifica se TODAS as cartas naturais são Ases
+    let sao_todos_ases = naturais.iter().all(|c| c.valor == Valor::As);
+
+    if sao_todos_ases {
+        // === ROTA 1: VALIDAÇÃO DE TRINCA DE ASES (LAVADEIRA) ===
+        // Regras da Lavadeira:
+        // 1. Mínimo 3 cartas (já checado no início).
+        // 2. Todos são Ases (já checado no if).
+
+        return true; // É uma lavadeira válida!
+    }
+
+    // === ROTA 2: VALIDAÇÃO DE SEQUÊNCIA (O seu código original) ===
+
+    // PASSO B (Sequência): Validar se todos têm o MESMO naipe
     let naipe_referencia = naturais[0].naipe;
     for c in &naturais {
         if c.naipe != naipe_referencia {
-            return false; // Misturou naipes
+            return false; // Na sequência, naipes misturados são proibidos
         }
     }
 
-    // --- PASSO C: ORDENAR E VERIFICAR LACUNAS ---
-    // Ordena pelo valor numérico (4, 5, 6...)
+    // PASSO C (Sequência): Ordenar e Verificar Lacunas
     naturais.sort_by_key(|c| c.valor_numerico_sequencia());
 
     let mut lacunas_para_preencher = 0;
 
-    // Percorre as cartas comparando a atual com a próxima
     for i in 0..(naturais.len() - 1) {
         let valor_atual = naturais[i].valor_numerico_sequencia();
         let valor_proximo = naturais[i + 1].valor_numerico_sequencia();
 
-        // Checagem de segurança (se entrou carta inválida como 3 ou outro Joker disfarçado)
+        // Checagem de segurança
         if valor_atual == 0 || valor_proximo == 0 {
             return false;
         }
 
-        // Se tiver duplicata (ex: 4, 4, 5), é inválido
+        // Duplicata em sequência é inválido (ex: 4-4-5)
         if valor_atual == valor_proximo {
             return false;
         }
 
-        // Calcula o "salto".
-        // Ex: 4 e 5 -> diff 1 (ok)
-        // Ex: 4 e 6 -> diff 2 (falta 1 carta)
-        // Ex: 4 e 7 -> diff 3 (faltam 2 cartas)
+        // Calcula o intervalo
+        // Ex: 4 e 5 -> (5 - 4 - 1) = 0 lacunas
+        // Ex: 4 e 6 -> (6 - 4 - 1) = 1 lacuna
         let diff = valor_proximo - valor_atual - 1;
-
-        // O numero de cartas faltando é (diff - 1)
         lacunas_para_preencher += diff;
     }
 
-    // --- PASSO D: CONTABILIDADE FINAL ---
+    // PASSO D: Temos coringas suficientes?
+    coringas_count >= lacunas_para_preencher
+}
 
-    // Temos coringas suficientes para tapar os buracos do meio?
-    if coringas_count >= lacunas_para_preencher {
-        // Sim! E se sobrar coringa?
-        // Ex: Tenho [4, 5]. Lacunas = 0. Coringas = 1.
-        // O coringa vira o 3 ou o 6. Isso é válido.
-        true
-    } else {
-        // Não temos coringas suficientes para conectar os números
-        // Ex: [4, 7] (precisa de 2 cartas para virar 4-5-6-7), mas só tenho 1 Joker.
-        false
-    }
+fn tem_coringa(jogo: &Vec<Carta>) -> bool {
+    jogo.iter().any(|c| c.eh_coringa())
+}
+
+fn calcula_pontos_jogos(jogos_mesa: &Vec<Vec<Carta>>) -> i32 {
+    jogos_mesa
+        .iter()
+        .map(|jogo| jogo.iter().map(|c| c.pontos()).sum::<i32>())
+        .sum()
 }
