@@ -1,7 +1,8 @@
 [package]
-name = "buracao_core"
+name = "buracao-core"
 version = "0.1.0"
 edition = "2021"
+
 
 [dependencies]
 # Serde é o padrão para serialização (Rust -> JSON)

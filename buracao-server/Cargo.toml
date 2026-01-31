@@ -1,0 +1,15 @@
+[package]
+name = "buracao-server"
+version = "0.1.0"
+edition = "2021"        # Recomendo manter 2021 por enquanto, 2024 ainda é instável em alguns tools
+
+[dependencies]
+# CORREÇÃO AQUI: era "buraco", agora é "buracao"
+buracao-core = { path = "../buracao-core" }
+
+tokio = { version = "1.0", features = ["full"] }
+axum = "0.8.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"

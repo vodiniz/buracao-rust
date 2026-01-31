@@ -1,11 +1,3 @@
-[package]
-name = "buracao-rust"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-
 [workspace]
-members = ["buracao_core", "buracao_server"]
-
+members = ["buracao-core", "buracao-server", "buracao-cli"]
 resolver = "2"
