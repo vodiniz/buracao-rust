@@ -2,7 +2,7 @@ use std::io::{self, Write};
 // use std::str::FromStr; // Não estamos usando explicitamente, o parse resolve
 
 // Importa tudo do core
-use buracao_core::acoes::AcaoJogador;
+use buracao_core::acoes::{AcaoJogador, MsgServidor};
 use buracao_core::baralho::Carta;
 use buracao_core::estado::EstadoJogo;
 
@@ -266,71 +266,88 @@ fn organizar_para_exibicao(cartas: &[Carta]) -> Vec<Carta> {
         return vec![];
     }
 
-    // 1. Descobre o naipe dominante (o que aparece mais vezes)
-    // Isso serve para saber se um '2' é carta natural ou curinga trocado
     let naipe_dominante = descobrir_naipe_dominante(cartas);
 
-    // 2. Separa Naturals vs Curingas
+    // Listas temporárias
     let mut naturais = Vec::new();
     let mut curingas = Vec::new();
+    let mut dois_ambiguos = Vec::new(); // 2 do mesmo naipe
 
+    // 1. Separação Inicial
     for c in cartas {
         if c.valor == buracao_core::baralho::Valor::Joker {
-            // Joker é sempre curinga
             curingas.push(c.clone());
-        } else if c.valor == buracao_core::baralho::Valor::Dois && Some(c.naipe) != naipe_dominante
-        {
-            // '2' de naipe diferente da sequência é Curinga!
-            curingas.push(c.clone());
+        } else if c.valor == buracao_core::baralho::Valor::Dois {
+            // Se o naipe for diferente, é Curinga com certeza
+            if Some(c.naipe) != naipe_dominante {
+                curingas.push(c.clone());
+            } else {
+                // Se for mesmo naipe, guardamos para decidir depois
+                dois_ambiguos.push(c.clone());
+            }
         } else {
-            // Pode ser carta normal ou um '2' do mesmo naipe (que pode ser curinga ou não)
-            // Para simplificar a visualização, se for do mesmo naipe, tratamos como natural
-            // a menos que cause duplicidade, mas vamos manter simples.
             naturais.push(c.clone());
         }
     }
 
-    // Se só tem curingas, retorna tudo junto
-    if naturais.is_empty() {
-        let mut tudo = curingas;
-        tudo.sort_by_key(|c| c.valor.indice_sequencia()); // Ordena os curingas entre si se quiser
-        return tudo;
-    }
-
-    // 3. Ordena as cartas naturais pelo valor (As=1 ... Rei=13)
+    // 2. Ordena os naturais puros para analisar o range
     naturais.sort_by_key(|c| c.valor.indice_sequencia());
 
-    // 4. Verifica se é TRINCA (ex: K♠️ K♣️ K♦️)
-    // Se o primeiro e último têm o mesmo valor, é lavadeira/trinca.
-    // Nesse caso, o curinga fica no fim.
-    if naturais.first().unwrap().valor == naturais.last().unwrap().valor {
+    // 3. Decide o destino dos "2" do mesmo naipe
+    // Regra visual: Se a menor carta natural for 4 ou maior, o "2" certamente está agindo como Curinga.
+    // Se tivermos um As (1) ou 3, o "2" provavelmente é natural.
+    let menor_natural = naturais
+        .first()
+        .map(|c| c.valor.indice_sequencia())
+        .unwrap_or(99);
+
+    for dois in dois_ambiguos {
+        if menor_natural >= 4 {
+            // Ex: Temos [6, 8, 9]. O menor é 6. Logo o 2 vira Curinga.
+            curingas.push(dois);
+        } else {
+            // Ex: Temos [A, 3]. O menor é 1. O 2 vira Natural (A, 2, 3).
+            naturais.push(dois);
+        }
+    }
+
+    // Reordena naturais agora que (talvez) inserimos os 2 naturais
+    naturais.sort_by_key(|c| c.valor.indice_sequencia());
+
+    // --- CASO DE TRINCA/LAVADEIRA (Sem sequência) ---
+    // Se só tem curingas ou se é trinca (ex: K, K, K)
+    let eh_trinca = if naturais.len() >= 2 {
+        naturais.first().unwrap().valor == naturais.last().unwrap().valor
+    } else {
+        false
+    };
+
+    if naturais.is_empty() || eh_trinca {
         let mut resultado = naturais;
+        // Na trinca, curingas vão pro final
         resultado.append(&mut curingas);
         return resultado;
     }
 
-    // 5. LÓGICA DE SEQUÊNCIA (Preencher Buracos)
+    // --- MONTAGEM DA SEQUÊNCIA (Preenchendo Gaps) ---
     let mut resultado = Vec::new();
 
-    // Pega a primeira
+    // Começa com a primeira carta
     let mut anterior = naturais[0].clone();
     resultado.push(anterior.clone());
 
-    // Itera sobre o restante das naturais
     for carta_atual in naturais.into_iter().skip(1) {
         let idx_ant = anterior.valor.indice_sequencia();
         let idx_atual = carta_atual.valor.indice_sequencia();
 
-        // Detecta o buraco. Ex: 10 (idx 10) e Q (idx 12). Diferença = 2.
         let gap = if idx_atual > idx_ant {
             idx_atual - idx_ant
         } else {
             0
         };
 
+        // Se tem buraco (ex: 6 pra 8, gap=2), tenta enfiar curinga
         if gap > 1 {
-            // Precisa preencher (gap - 1) espaços
-            // Ex: Entre 10 e Q (gap 2), cabe 1 carta.
             let precisa = gap - 1;
             for _ in 0..precisa {
                 if let Some(curinga) = curingas.pop() {
@@ -343,9 +360,7 @@ fn organizar_para_exibicao(cartas: &[Carta]) -> Vec<Carta> {
         anterior = carta_atual;
     }
 
-    // 6. Se ainda sobrou curinga (ex: sequência terminou aberta, ou curinga é o ás), põe no final
-    // Nota: Para visualização perfeita (ex: curinga antes do 3), a lógica seria mais complexa,
-    // mas colocar no final funciona para 99% dos casos de leitura.
+    // Se sobraram curingas (ex: sequência terminou aberta), põe no final
     resultado.append(&mut curingas);
 
     resultado

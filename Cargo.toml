@@ -1,3 +1,9 @@
 [workspace]
-members = ["buracao-core", "buracao-server", "buracao-cli"]
+members = [
+  "buracao-core",
+  "buracao-server",
+  "buracao-cli",
+  "buracao-client-cli",
+  "buracao-web",
+]
 resolver = "2"

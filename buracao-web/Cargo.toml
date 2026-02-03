@@ -1,0 +1,54 @@
+[package]
+name = "buracao-web"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Framework Web
+leptos = { version = "0.7", features = ["csr"] }
+leptos_router = { version = "0.7" }
+leptos_meta = { version = "0.7" }
+
+
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+# Lógica do Jogo (Sua workspace)
+buracao-core = { path = "../buracao-core" }
+
+# Serialização (Para comunicar com o server)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Utilitários Web / WASM
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+  "HtmlDivElement",
+  "HtmlImageElement",
+  "HtmlButtonElement",
+  "MouseEvent",
+  "WebSocket",         # Indispensável para o Multiplayer
+  "MessageEvent",
+  "ErrorEvent",
+  "CloseEvent",
+  "console",
+  "Window",
+  "Document",
+] }
+console_error_panic_hook = "0.1" # Para ver erros do Rust no console do browser
+console_log = "1.0"
+log = "0.4"
+
+futures = "0.3" # Para streams (ler mensagens)
+# Async no frontend (necessário para spawnar tasks de websocket)
+wasm-bindgen-futures = "0.4"
+
+# Helper para requisições/sockets (Opcional, mas gloo facilita muito)
+gloo-net = "0.6"
+gloo-timers = "0.3"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+# Nota sobre Features do Leptos 0.7:
+# "csr" habilita o modo Client-Side Rendering (SPA).
+# "nightly" habilita a sintaxe de signals mais limpa (opcional, mas recomendada se usar nightly rust).

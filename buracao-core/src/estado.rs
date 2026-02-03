@@ -1,6 +1,6 @@
 use crate::acoes::AcaoJogador;
 use crate::acoes::{DetalheJogo, VisaoJogador};
-use crate::baralho::{Baralho, Carta, Naipe, Valor}; // Importa do módulo vizinho
+use crate::baralho::{Baralho, Carta}; // Importa do módulo vizinho
 use crate::regras::{tem_coringa, validar_jogo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap; // Importa as funções puras
@@ -79,7 +79,6 @@ impl EstadoJogo {
 
         let mut maos: Vec<Vec<Carta>> = vec![Vec::new(); 4];
 
-        // REGRA BURACO: Geralmente são 11 cartas por jogador.
         for _ in 0..15 {
             for mao in &mut maos {
                 if let Some(carta) = self.baralho.comprar() {
@@ -262,8 +261,10 @@ impl EstadoJogo {
 
         // Chama a contagem final dos pontos da mesa e mãos restantes
         self.contar_pontos_final();
-    }
 
+        // reiniciar jogo
+    }
+    #[allow(dead_code)]
     fn pode_bater(&self, id_jogador: usize) -> Result<(), String> {
         // Regra 1: Proibido bater se comprou o lixo nesta rodada
         if self.pegou_lixo_nesta_rodada {
@@ -309,8 +310,8 @@ impl EstadoJogo {
     pub fn tentar_comprar_lixo(
         &mut self,
         jogador_id: u32,
-        novos_jogos: Vec<Vec<Carta>>, // Jogos novos que ele está criando
-        ajuntes: Vec<(u32, Vec<Carta>)>, // (ID do jogo na mesa, cartas da mão que ele vai somar)
+        mut novos_jogos: Vec<Vec<Carta>>, // <--- Agora é MUT (para inserirmos a carta do lixo se der certo)
+        mut ajuntes: Vec<(u32, Vec<Carta>)>, // <--- Agora é MUT
     ) -> Result<(), String> {
         // --- 1. VALIDAÇÕES BÁSICAS ---
         if self.turno_atual != jogador_id {
@@ -332,37 +333,60 @@ impl EstadoJogo {
         let time_id = jogador_id % 2;
         let jogador_idx = jogador_id as usize;
 
-        // --- 2. VERIFICAR SE O TOPO FOI USADO E SE HÁ PELO MENOS 3 CARTAS ---
+        // --- 2. VERIFICAR SE O TOPO FOI USADO (CORREÇÃO AQUI) ---
+        // A lógica antiga falhava porque a carta do lixo não estava dentro de 'novos_jogos'.
+        // Agora, tentamos inserir a carta virtualmente. Se der certo, ela fica lá.
 
-        // Verificamos nos jogos novos
-        let usado_em_novo = novos_jogos
-            .iter()
-            .find(|jogo| jogo.iter().any(|c| c == &carta_topo_lixo) && jogo.len() >= 3);
+        let mut lixo_usado = false;
 
-        // Verificamos nos ajuntes
-        let usado_em_ajunte = ajuntes.iter().find(|(id_jogo, cartas_somadas)| {
-            let mesa = if time_id == 0 {
+        // A) Tenta encaixar nos Novos Jogos
+        for jogo in &mut novos_jogos {
+            if !lixo_usado {
+                // Cria uma cópia para teste com a carta do lixo adicionada
+                let mut jogo_teste = jogo.clone();
+                jogo_teste.push(carta_topo_lixo.clone());
+
+                // Se validar, significa que o lixo encaixa aqui.
+                // IMPORTANTE: Atualizamos o vetor 'jogo' original com a carta do lixo.
+                if validar_jogo(&jogo_teste) {
+                    jogo.push(carta_topo_lixo.clone());
+                    lixo_usado = true;
+                }
+            }
+        }
+
+        // B) Tenta encaixar nos Ajuntes (se ainda não usou)
+        if !lixo_usado {
+            let mesa_jogos = if time_id == 0 {
                 &self.jogos_time_a
             } else {
                 &self.jogos_time_b
             };
-            if let Some(jogo_mesa) = mesa.get(id_jogo) {
-                // A carta do topo tem que estar nas cartas que ele está enviando
-                let contem_topo = cartas_somadas.iter().any(|c| c == &carta_topo_lixo);
-                // O total (mesa + novas) deve ser >= 3 (o que sempre será verdade no Buraco, mas checamos)
-                contem_topo && (jogo_mesa.len() + cartas_somadas.len() >= 3)
-            } else {
-                false
-            }
-        });
 
-        if usado_em_novo.is_none() && usado_em_ajunte.is_none() {
+            for (id_jogo, cartas_somadas) in &mut ajuntes {
+                if let Some(jogo_mesa) = mesa_jogos.get(id_jogo) {
+                    // Simula: Jogo da Mesa + Cartas da Mão + Carta do Lixo
+                    let mut jogo_teste = jogo_mesa.clone();
+                    jogo_teste.extend(cartas_somadas.clone());
+                    jogo_teste.push(carta_topo_lixo.clone());
+
+                    if validar_jogo(&jogo_teste) {
+                        // Se encaixou, adicionamos a carta do lixo ao vetor de cartas somadas
+                        cartas_somadas.push(carta_topo_lixo.clone());
+                        lixo_usado = true;
+                        break; // Já achou onde usar, para de procurar
+                    }
+                }
+            }
+        }
+
+        if !lixo_usado {
             return Err(
-                "Você deve usar a carta do topo em um jogo de pelo menos 3 cartas.".to_string(),
+                "Você deve usar a carta do topo em um jogo válido (novo ou existente).".to_string(),
             );
         }
 
-        // --- 3. VALIDAR INTEGRIDADE DOS JOGOS (Simulação) ---
+        // --- 3. VALIDAR INTEGRIDADE DOS JOGOS (Agora os vetores já têm a carta do lixo) ---
 
         // Validar novos jogos
         for jogo in &novos_jogos {
@@ -381,14 +405,14 @@ impl EstadoJogo {
             let jogo_mesa = mesa.get(id_jogo).ok_or("Jogo de ajunte não encontrado.")?;
 
             let mut jogo_combinado = jogo_mesa.clone();
-            jogo_combinado.extend(cartas_somadas.clone());
+            jogo_combinado.extend(cartas_somadas.clone()); // cartas_somadas já inclui a do lixo se foi usada aqui
 
             if !validar_jogo(&jogo_combinado) {
                 return Err("Um dos ajuntes resultou em um jogo inválido.".to_string());
             }
         }
 
-        // --- 4. VALIDAÇÃO DE PONTOS DE ABERTURA (Se for o caso) ---
+        // --- 4. VALIDAÇÃO DE PONTOS DE ABERTURA ---
         let ja_abriu = if time_id == 0 {
             !self.jogos_time_a.is_empty()
         } else {
@@ -397,22 +421,30 @@ impl EstadoJogo {
 
         if !ja_abriu {
             let mut total_pontos = 0;
+            // Como injetamos a carta do lixo nos vetores na Seção 2, os pontos dela serão somados aqui automaticamente.
             for j in &novos_jogos {
                 total_pontos += j.iter().map(|c| c.pontos()).sum::<i32>();
             }
-            // Nota: No Buraco, geralmente você só abre com jogos NOVOS ou ajuntes na mesma jogada
+
             for (_, cartas) in &ajuntes {
                 total_pontos += cartas.iter().map(|c| c.pontos()).sum::<i32>();
             }
 
             if total_pontos < self.pontos_para_descer(jogador_id) {
-                return Err("Pontos insuficientes para abrir.".to_string());
+                return Err(format!(
+                    "Pontos insuficientes para abrir. Necessário: {}, Obtido: {}",
+                    self.pontos_para_descer(jogador_id),
+                    total_pontos
+                ));
             }
         }
 
         // --- 5. EXECUÇÃO (Ponto de não retorno) ---
 
         // A. O lixo vai para a mão
+        // NOTA: Movemos o lixo ANTES de remover as cartas dos jogos.
+        // Isso é crucial, pois a carta do lixo agora faz parte de 'novos_jogos'/'ajuntes'.
+        // Ao mover o lixo para a mão, garantimos que o .remove(pos) abaixo vai encontrar a carta.
         let mut cartas_lixo = self.lixo.drain(..).collect::<Vec<Carta>>();
         self.maos[jogador_idx].append(&mut cartas_lixo);
 
@@ -422,7 +454,7 @@ impl EstadoJogo {
                 let pos = self.maos[jogador_idx]
                     .iter()
                     .position(|c| c == carta)
-                    .unwrap();
+                    .unwrap(); // Unwrap seguro pois acabamos de mover o lixo pra mão
                 self.maos[jogador_idx].remove(pos);
             }
             let id = self.proximo_id_jogo;
@@ -451,15 +483,17 @@ impl EstadoJogo {
             };
             if let Some(j) = mesa.get_mut(&id_jogo) {
                 j.extend(cartas_novas);
-                j.sort_by_key(|c| c.valor_numerico_sequencia()); // Opcional: manter ordenado
+                j.sort_by_key(|c| c.valor_numerico_sequencia());
             }
         }
+
         self.comprou_nesta_rodada = true;
         self.pegou_lixo_nesta_rodada = true;
         self.maos[jogador_idx].sort();
 
         Ok(())
     }
+
     pub fn descer(
         &mut self,
         id_jogador: u32,
@@ -634,7 +668,7 @@ impl EstadoJogo {
         Ok(())
     }
 
-    pub fn comprar_carta(&mut self, id_jogador: usize) -> Result<(Carta), String> {
+    pub fn comprar_carta(&mut self, id_jogador: usize) -> Result<Carta, String> {
         if self.comprou_nesta_rodada {
             return Err("Você já comprou uma carta neste turno. Jogue ou descarte.".to_string());
         }
@@ -865,11 +899,6 @@ impl EstadoJogo {
                     .map(|(id, cartas)| DetalheJogo {
                         id: *id,
                         cartas: cartas.clone(),
-                        tipo: if cartas.len() >= 7 {
-                            "Canastra".to_string()
-                        } else {
-                            "Normal".to_string()
-                        },
                     })
                     .collect();
                 // Ordenar por ID para a UI não ficar pulando
@@ -884,6 +913,8 @@ impl EstadoJogo {
 
             mesa_time_a: converter_mesa(&self.jogos_time_a),
             mesa_time_b: converter_mesa(&self.jogos_time_b),
+            tres_vermelho_time_a: self.tres_vermelhos_time_a.clone(),
+            tres_vermelho_time_b: self.tres_vermelhos_time_b.clone(),
 
             lixo: self.lixo.last().cloned(), // Envia todo o lixo (Buraco Aberto). Se for Fechado, mude aqui.
             //
@@ -896,8 +927,78 @@ impl EstadoJogo {
 
             cartas_no_monte: self.baralho.restantes(),
             // Assumindo que você tem lógica de morto, senão hardcode false
-            tem_morto_a: false, // Implementar logica de morto se tiver
-            tem_morto_b: false,
         }
+    }
+
+    pub fn gerar_visao_para_jogador(&self, id_observador: u32) -> VisaoJogador {
+        // 1. Clonar a mesa (Pública para todos)
+        // Aqui assumo que você tem uma função para converter seu HashMap da mesa em Vec<DetalheJogo>
+        let mesa_a = self.converter_mesa_para_detalhe(&self.jogos_time_a);
+        let mesa_b = self.converter_mesa_para_detalhe(&self.jogos_time_b);
+
+        // 2. Calcular quantas cartas cada oponente tem (sem revelar quais são)
+        let qtd_cartas: Vec<usize> = self.maos.iter().map(|mao| mao.len()).collect();
+
+        // 3. Montar a struct final
+        VisaoJogador {
+            meu_id: id_observador,
+
+            // O PULO DO GATO: Só enviamos as cartas se o índice for igual ao do observador!
+            minha_mao: self.maos[id_observador as usize].clone(),
+
+            posso_jogar: self.turno_atual == id_observador,
+
+            mesa_time_a: mesa_a,
+            mesa_time_b: mesa_b,
+
+            tres_vermelho_time_a: self.tres_vermelhos_time_a.clone(),
+            tres_vermelho_time_b: self.tres_vermelhos_time_b.clone(),
+
+            // Lixo: Se a regra for fechada, talvez precise esconder cartas que não estão no topo
+            lixo: self.lixo.last().cloned(),
+
+            qtd_cartas_jogadores: qtd_cartas,
+
+            pontuacao_a: self.pontuacao_a, // (precisa ter esses campos no EstadoJogo)
+            pontuacao_b: self.pontuacao_b,
+            turno_atual: self.turno_atual,
+            rodada: self.rodada, // (assumindo que você tem contador de rodada)
+            cartas_no_monte: self.baralho.restantes(),
+        }
+    }
+
+    // Helper auxiliar para formatar a mesa
+    fn converter_mesa_para_detalhe(
+        &self,
+        mesa: &std::collections::HashMap<u32, Vec<Carta>>,
+    ) -> Vec<DetalheJogo> {
+        mesa.iter()
+            .map(|(id, cartas)| {
+                DetalheJogo {
+                    id: *id,
+                    cartas: cartas.clone(), // Na mesa todo mundo vê tudo
+                                            // ... outros campos se tiver
+                }
+            })
+            .collect()
+    }
+
+    pub fn resetar_jogo(&mut self) {
+        // Limpa mesas
+        self.jogos_time_a.clear();
+        self.jogos_time_b.clear();
+
+        // Recria baralho e lixo
+        self.baralho = Baralho::new(); // Ou sua lógica de criar baralho embaralhado
+        self.lixo.clear();
+
+        self.dar_cartas();
+
+        // Reseta variáveis de controle
+        self.turno_atual = 0; // Começa o jogador 0 de novo (ou quem ganhou)
+        self.comprou_nesta_rodada = false;
+        self.pegou_lixo_nesta_rodada = false;
+        self.proximo_id_jogo = 0;
+        self.partida_encerrada = false;
     }
 }

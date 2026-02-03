@@ -6,5 +6,5 @@ pub mod regras;
 
 // Facilita a vida de quem usa:
 pub use acoes::AcaoJogador;
-pub use baralho::{Carta, Naipe, Valor};
+pub use baralho::{Carta, Naipe, Valor, Verso};
 pub use estado::EstadoJogo;

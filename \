@@ -1,0 +1,12 @@
+[build]
+target = "index.html"
+
+# Configuração para copiar seus Assets
+# Isso vai pegar tudo em "assets" e jogar na raiz do dist/
+[[copy]]
+source = "assets"
+target = "assets"
+
+[watch]
+# Ignora mudanças na pasta assets para não recompilar o Rust à toa
+ignore = ["./assets"]

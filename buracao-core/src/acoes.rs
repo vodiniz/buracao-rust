@@ -76,6 +76,8 @@ pub struct VisaoJogador {
     // 2. Dados Públicos da Mesa
     pub mesa_time_a: Vec<DetalheJogo>,
     pub mesa_time_b: Vec<DetalheJogo>,
+    pub tres_vermelho_time_a: Vec<Carta>,
+    pub tres_vermelho_time_b: Vec<Carta>,
     pub lixo: Option<Carta>, // No buraco aberto vê tudo, no fechado só o topo (ajuste na lógica)
 
     // 3. Dados dos Oponentes (Anonimizados)
@@ -90,8 +92,6 @@ pub struct VisaoJogador {
 
     // 5. Metadados do Baralho
     pub cartas_no_monte: usize,
-    pub tem_morto_a: bool, // Se o morto do time A ainda está lá
-    pub tem_morto_b: bool, // Se o morto do time B ainda está lá
 }
 
 // Uma representação simplificada de um jogo na mesa para o frontend
@@ -99,5 +99,4 @@ pub struct VisaoJogador {
 pub struct DetalheJogo {
     pub id: u32,
     pub cartas: Vec<Carta>,
-    pub tipo: String, // "Sequencia", "Trinca", "Canastra Real", etc. (opcional)
 }

@@ -15,6 +15,12 @@ pub enum Naipe {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
+pub enum Verso {
+    Red,
+    Blue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum Valor {
     Tres,
     Quatro,
@@ -36,6 +42,7 @@ pub enum Valor {
 pub struct Carta {
     pub naipe: Naipe,
     pub valor: Valor,
+    pub verso: Verso,
 }
 
 impl fmt::Display for Naipe {
@@ -116,7 +123,11 @@ impl Carta {
 
     /// Verifica se a carta funciona como coringa (2 ou Joker)
     pub fn eh_coringa(&self) -> bool {
-        matches!(self.valor, Valor::Dois | Valor::Joker)
+        matches!(self.valor, Valor::Dois)
+    }
+
+    pub fn eh_coringao(&self) -> bool {
+        matches!(self.valor, Valor::Joker)
     }
 
     pub fn eh_tres_vermelho(&self) -> bool {
@@ -164,7 +175,7 @@ impl Baralho {
         let mut cartas = Vec::new();
 
         // Buraco usa 2 baralhos
-        for _ in 0..2 {
+        for verso in [Verso::Red, Verso::Blue] {
             // Adiciona as cartas normais (A a K)
             for naipe in [Naipe::Copas, Naipe::Ouros, Naipe::Espadas, Naipe::Paus] {
                 for valor in [
@@ -182,17 +193,23 @@ impl Baralho {
                     Valor::Dama,
                     Valor::Rei,
                 ] {
-                    cartas.push(Carta { naipe, valor });
+                    cartas.push(Carta {
+                        naipe,
+                        valor,
+                        verso,
+                    });
                 }
             }
             // Adiciona 2 Jokers por baralho (geralmente)
             cartas.push(Carta {
                 naipe: Naipe::Nenhum,
                 valor: Valor::Joker,
+                verso: Verso::Red,
             });
             cartas.push(Carta {
                 naipe: Naipe::Nenhum,
                 valor: Valor::Joker,
+                verso: Verso::Blue,
             });
         }
 

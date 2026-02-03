@@ -11,7 +11,7 @@ pub fn validar_jogo(cartas: &[Carta]) -> bool {
     let mut coringas_count = 0;
 
     for c in cartas {
-        if c.eh_coringa() {
+        if c.eh_coringa() || c.eh_joker() {
             coringas_count += 1;
         } else {
             naturais.push(c);
@@ -85,6 +85,7 @@ pub fn tem_coringa(jogo: &[Carta]) -> bool {
     jogo.iter().any(|c| c.eh_coringa())
 }
 
+#[allow(dead_code)]
 fn calcula_pontos_jogos(jogos_mesa: &Vec<Vec<Carta>>) -> i32 {
     jogos_mesa
         .iter()
