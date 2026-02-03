@@ -9,3 +9,6 @@ public_url = "/"
 port = 8080
 # Abrir o navegador automaticamente?
 open = false
+
+[[assets]]
+source = "public"

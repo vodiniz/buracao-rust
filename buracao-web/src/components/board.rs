@@ -6,11 +6,20 @@ use leptos::prelude::*;
 #[component]
 pub fn Board(
     #[prop(into)] lixo: Signal<Option<Carta>>,
+    #[prop(into)] lixo_selecionado: Signal<bool>, // <--- NOVO PROP
     #[prop(default = None)] on_click_deck: Option<Callback<web_sys::MouseEvent>>,
     #[prop(default = None)] on_click_trash: Option<Callback<web_sys::MouseEvent>>,
 ) -> impl IntoView {
     // Helper para passar "Nenhuma seleção" para as cartas do tabuleiro
     let no_selection = Signal::derive(|| None);
+
+    let selection_lixo_visual = Signal::derive(move || {
+        if lixo_selecionado.get() {
+            Some(1)
+        } else {
+            None
+        } // Grupo 1 = Verde/Amarelo dependendo do seu CSS
+    });
 
     view! {
         <div style="
@@ -44,8 +53,8 @@ pub fn Board(
                             <Card
                                 id=carta_para_asset(&carta)
                                 width="100px".to_string()
-                                // CORREÇÃO: Passamos o sinal vazio
-                                selection_group=no_selection
+                                // AQUI USAMOS O SINAL VISUAL
+                                selection_group=selection_lixo_visual
                                 on_click=on_click_trash
                             />
                         </div>

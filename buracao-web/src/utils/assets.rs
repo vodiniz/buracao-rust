@@ -1,18 +1,25 @@
-/// Utilitário responsável por resolver os caminhos estáticos dos assets.
-/// Centraliza a lógica de strings para evitar "magic strings" espalhadas pelos componentes.
-
 // Caminho base configurado no Trunk ou servidor de arquivos
 const CARDS_BASE_PATH: &str = "/assets/cards/PaperCards1.1";
 
-/// Gera o caminho completo para uma carta baseada no identificador.
-///
-/// # Argumentos
-/// * `card_id` - O identificador da carta conforme sua convenção (ex: "c_2", "d_q", "joker_b").
-///
-/// # Retorno
-/// Uma `String` contendo o caminho relativo para o arquivo png.
+#[derive(Clone, Copy)]
+pub enum CardTheme {
+    Paper,
+    // Future: PixelArt, Modern, etc.
+}
+
+impl CardTheme {
+    pub fn folder(&self) -> &str {
+        match self {
+            CardTheme::Paper => "/assets/cards/PaperCards1.1",
+        }
+    }
+}
+
+// Estado global simples ou passado via props (por enquanto hardcoded)
+const CURRENT_THEME: CardTheme = CardTheme::Paper;
+
 pub fn get_card_path(card_id: &str) -> String {
-    format!("{}/{}.png", CARDS_BASE_PATH, card_id)
+    format!("{}/{}.png", CURRENT_THEME.folder(), card_id)
 }
 
 /// Gera o caminho para o verso da carta (Back).
