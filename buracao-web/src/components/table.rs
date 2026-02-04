@@ -1,84 +1,155 @@
 use crate::components::card::Card;
-use crate::utils::mappers::carta_para_asset;
+use crate::utils::mappers::{carta_para_asset, organizar_para_exibicao};
 use buracao_core::acoes::DetalheJogo;
+use buracao_core::baralho::Carta; // <--- Importante
 use leptos::prelude::*;
 
 #[component]
 pub fn Table(
-    #[prop(into)] jogos_time_a: Signal<Vec<DetalheJogo>>,
-    #[prop(into)] jogos_time_b: Signal<Vec<DetalheJogo>>,
-
-    // CORREÇÃO AQUI:
-    // Trocamos #[prop(optional)] por #[prop(default = None)]
-    // Isso diz ao Leptos: "Espere receber um Option<Callback>. Se não receber nada, use None."
-    // Assim, os tipos batem com o que você criou no app.rs (cb_a e cb_b).
-    #[prop(default = None)] on_click_jogo_a: Option<Callback<usize>>,
-    #[prop(default = None)] on_click_jogo_b: Option<Callback<usize>>,
+    #[prop(into)] titulo: String,
+    #[prop(into)] jogos: Signal<Vec<DetalheJogo>>,
+    // NOVA PROP: Recebe os 3 vermelhos. Default vazio para não quebrar se não passar.
+    #[prop(into, default = Signal::derive(|| vec![]))] tres_vermelhos: Signal<Vec<Carta>>,
+    #[prop(optional, into, default = "/assets/cards/PaperCards1.1".to_string())] theme: String,
+    #[prop(default = None)] on_click: Option<Callback<usize>>,
+    #[prop(into, default = "80px".to_string().into())] card_width: Signal<String>,
 ) -> impl IntoView {
-    let render_lado = move |titulo: String,
-                            jogos: Vec<DetalheJogo>,
-                            callback: Option<Callback<usize>>| {
-        let interativo = callback.is_some();
+    let interativo = on_click.is_some();
 
-        view! {
-            <div style="flex: 1; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px; margin: 5px; min-width: 300px;">
-                <h3 style="margin-top: 0; color: #ffeb3b; font-size: 14px; text-transform: uppercase;">{titulo}</h3>
+    let theme_body = theme.clone();
+    let theme_footer = theme.clone();
 
-                <div style="display: flex; flex-wrap: wrap; gap: 15px;">
-                    {if jogos.is_empty() {
-                        view! { <span style="font-size: 12px; color: rgba(255,255,255,0.4);">"Nenhum jogo baixado"</span> }.into_any()
-                    } else {
-                        jogos.into_iter().enumerate().map(|(idx, jogo)| {
-                            // Clona o callback para mover para dentro da closure
-                            let cb_local = callback;
+    view! {
+        <div style="
+            flex: 1; 
+            border: 1px solid rgba(255,255,255,0.1); 
+            border-radius: 12px; 
+            min-width: 300px; 
+            background: rgba(0,0,0,0.15);
+            display: flex;
+            flex-direction: column; /* Organiza Header, Body, Footer verticalmente */
+            height: 100%; 
+            max-height: 50vh; 
+            overflow: hidden; /* O Container pai não scrola, quem scrola é o miolo */
+        ">
+            // --- HEADER (FIXO) ---
+            <h3 style="
+                margin: 0;
+                padding: 10px;
+                color: #ffeb3b; 
+                font-size: 14px; 
+                text-transform: uppercase; 
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+                background: rgba(0,0,0,0.2);
+                text-align: center;
+                flex-shrink: 0;
+            ">
+                {titulo}
+            </h3>
 
+            // --- BODY (JOGOS - COM SCROLL) ---
+            <div style="
+                flex: 1; /* Ocupa todo espaço disponível */
+                overflow-y: auto; /* Scroll apenas aqui */
+                padding: 10px;
+                scrollbar-width: thin;
+                scrollbar-color: rgba(255,255,255,0.3) transparent;
+            ">
+                <div style="display: flex; flex-wrap: wrap; gap: 15px; align-content: flex-start; justify-content: center;">
+                    {move || {
+                        let lista_jogos = jogos.get();
+                        if lista_jogos.is_empty() {
                             view! {
-                                <div
-                                    on:click=move |_| {
-                                        if let Some(cb) = cb_local {
-                                            cb.run(idx);
-                                        }
-                                    }
-                                    style=move || {
-                                        let cursor = if interativo { "pointer" } else { "default" };
-                                        format!("
-                                            background: rgba(0,0,0,0.2); 
-                                            padding: 5px; 
-                                            border-radius: 8px;
-                                            display: flex;
-                                            align-items: center;
-                                            cursor: {};
-                                            transition: background 0.2s;
-                                            border: 1px solid transparent;
-                                        ", cursor)
-                                    }
-                                >
-                                    {jogo.cartas.into_iter().map(|c| {
-                                        view! {
-                                            <div style="margin-right: -25px;">
-                                                <Card
-                                                    id=carta_para_asset(&c)
-                                                    width="60px".to_string()
-                                                    selection_group=Signal::derive(|| None)
-                                                />
-                                            </div>
-                                        }
-                                    }).collect::<Vec<_>>()}
-
-                                    <div style="width: 25px;"></div>
+                                <div style="width: 100%; text-align: center; padding: 20px; color: rgba(255,255,255,0.3); font-style: italic; font-size: 12px;">
+                                    "Nenhum jogo"
                                 </div>
-                            }
-                        }).collect::<Vec<_>>().into_any()
+                            }.into_any()
+                        } else {
+                            lista_jogos.into_iter().enumerate().map(|(idx, jogo)| {
+                                let cb_local = on_click;
+                                let cartas_visuais = organizar_para_exibicao(&jogo.cartas);
+                                let theme_local = theme_body.clone();
+
+                                view! {
+                                    <div
+                                        on:click=move |_| {
+                                            if let Some(cb) = cb_local {
+                                                cb.run(idx);
+                                            }
+                                        }
+                                        style=move || {
+                                            let cursor = if interativo { "pointer" } else { "default" };
+                                            format!("
+                                                background: rgba(0,0,0,0.2); 
+                                                padding: 8px; 
+                                                border-radius: 10px;
+                                                display: flex;
+                                                align-items: center;
+                                                cursor: {};
+                                                transition: all 0.2s;
+                                                border: 1px solid rgba(255,255,255,0.05);
+                                                min-height: 90px;
+                                            ", cursor)
+                                        }
+                                    >
+                                        {cartas_visuais.into_iter().map(|c| {
+                                            view! {
+                                                <div style="margin-right: -35px;">
+                                                    <Card
+                                                        id=carta_para_asset(&c)
+                                                        width=card_width // <--- Tamanho dinâmico
+                                                        selection_group=Signal::derive(|| None)
+                                                        theme=theme_local.clone()
+                                                    />
+                                                </div>
+                                            }
+                                        }).collect::<Vec<_>>()}
+
+                                        <div style="width: 35px;"></div>
+                                    </div>
+                                }
+                            }).collect::<Vec<_>>().into_any()
+                        }
                     }}
                 </div>
             </div>
-        }
-    };
 
-    view! {
-        <div style="width: 100%; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-bottom: 20px;">
-            {move || render_lado("Mesa Time A".to_string(), jogos_time_a.get(), on_click_jogo_a)}
-            {move || render_lado("Mesa Time B".to_string(), jogos_time_b.get(), on_click_jogo_b)}
+            // --- FOOTER (3 VERMELHOS - FIXO EMBAIXO) ---
+            {move || {
+                let tres = tres_vermelhos.get();
+                let theme_local = theme_footer.clone();
+                if !tres.is_empty() {
+                    view! {
+                        <div style="
+                            padding: 5px 10px;
+                            background: rgba(0,0,0,0.3);
+                            border-top: 1px solid rgba(255,255,255,0.1);
+                            display: flex;
+                            align-items: center;
+                            gap: 10px;
+                            flex-shrink: 0;
+                            min-height: 40px;
+                        ">
+                            <span style="font-size: 10px; color: #ff5252; font-weight: bold; text-transform: uppercase;">
+                            </span>
+                            <div style="display: flex; gap: 5px;">
+                                {tres.into_iter().map(|c| {
+                                    view! {
+                                        <Card
+                                            id=carta_para_asset(&c)
+                                            width="35px".to_string() // <--- Tamanho reduzido
+                                            selection_group=Signal::derive(|| None)
+                                            theme=theme_local.clone()
+                                        />
+                                    }
+                                }).collect::<Vec<_>>()}
+                            </div>
+                        </div>
+                    }.into_any()
+                } else {
+                    view! {}.into_any()
+                }
+            }}
         </div>
     }
 }

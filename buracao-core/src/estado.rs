@@ -784,6 +784,7 @@ impl EstadoJogo {
         }
 
         // Passa o turno normal
+        self.rodada += 1;
         self.turno_atual = (self.turno_atual + 1) % 4;
         self.pegou_lixo_nesta_rodada = false;
         self.comprou_nesta_rodada = false;
@@ -996,6 +997,7 @@ impl EstadoJogo {
 
         // Reseta variáveis de controle
         self.turno_atual = 0; // Começa o jogador 0 de novo (ou quem ganhou)
+        self.rodada = 0;
         self.comprou_nesta_rodada = false;
         self.pegou_lixo_nesta_rodada = false;
         self.proximo_id_jogo = 0;

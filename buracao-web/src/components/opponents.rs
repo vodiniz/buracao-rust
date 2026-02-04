@@ -3,8 +3,9 @@ use leptos::prelude::*;
 
 #[component]
 pub fn OpponentHand(
+    #[prop(optional, into, default = "/assets/cards/PaperCards1.1".to_string())] theme: String,
     posicao: &'static str, // "top", "left", "right"
-    qtd_cartas: usize,
+    #[prop(into)] qtd_cartas: usize,
 ) -> impl IntoView {
     // Define a rotação e layout baseada na posição
     let style_container = match posicao {
@@ -33,6 +34,7 @@ pub fn OpponentHand(
                             id="back_r".to_string() // Verso Vermelho
                             width="80px".to_string()
                             selection_group=Signal::derive(|| None)
+                            theme=theme.clone()
                         />
                     </div>
                 }).collect::<Vec<_>>()

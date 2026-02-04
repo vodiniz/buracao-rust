@@ -4,43 +4,38 @@ use gloo_net::websocket::{futures::WebSocket, Message};
 use leptos::prelude::window;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use leptos::wasm_bindgen::JsCast; // <--- ADICIONE ISSO
 use serde_json;
 use std::collections::HashSet;
 
 use crate::components::board::Board;
+use crate::components::controls::GameControls;
 use crate::components::hand::Hand;
+use crate::components::scoreboard::Scoreboard;
+use crate::components::settings::SettingsModal;
 use crate::components::table::Table;
-use crate::utils::assets::get_card_path;
-
-use crate::utils::mappers::{carta_para_asset, carta_para_asset_path};
 
 // CORREÇÃO: Usar DetalheJogo aqui também
 use buracao_core::acoes::{AcaoJogador, DetalheJogo, MsgServidor};
 use buracao_core::baralho::Carta;
 
 #[component]
-fn CardImage(carta: Carta, #[prop(default = "50px")] width: &'static str) -> impl IntoView {
-    let src = carta_para_asset_path(&carta);
+fn CardImage(
+    carta: buracao_core::baralho::Carta,
+    #[prop(default = "50px")] width: &'static str,
+    theme: String, // <--- Recebe tema
+) -> impl IntoView {
+    use crate::utils::assets::get_card_path;
+    use crate::utils::mappers::carta_para_asset;
 
-    // Clonamos o src para usar no log e no tratamento de erro sem "roubar"
-    // o valor que vai para a tag <img>
-    let src_error = src.clone();
-
-    view! {
-        <img
-            src=src.clone() // Aqui o src original é movido
-            style=format!("width: {}; height: auto; display: block; border-radius: 4px;", width)
-            alt=format!("{}", src.clone())
-            on:error=move |_ev| {
-                // Usamos a cópia clonada aqui
-                leptos::logging::error!("Falha ao carregar imagem da carta: {}", src_error);
-            }
-        />
-    }
+    let id = carta_para_asset(&carta);
+    let src = get_card_path(&id, &theme);
+    view! { <img src=src style=format!("width: {}; height: auto;", width) /> }
 }
 
 #[component]
 pub fn App() -> impl IntoView {
+    let (turno_atual_id, set_turno_atual_id) = signal(0_u32);
     let (minha_mao, set_minha_mao) = signal(Vec::<Carta>::new());
     let (lixo_topo, set_lixo_topo) = signal(Option::<Carta>::None);
 
@@ -53,6 +48,12 @@ pub fn App() -> impl IntoView {
     let (mesa_a, set_mesa_a) = signal(Vec::<DetalheJogo>::new());
     let (mesa_b, set_mesa_b) = signal(Vec::<DetalheJogo>::new());
 
+    let (pontuacao_a, set_pontuacao_a) = signal(0);
+    let (pontuacao_b, set_pontuacao_b) = signal(0);
+
+    let (tres_vermelhos_a, set_tres_vermelhos_a) = signal(Vec::<Carta>::new());
+    let (tres_vermelhos_b, set_tres_vermelhos_b) = signal(Vec::<Carta>::new());
+
     let (meu_id, set_meu_id) = signal(0_u32);
     let (status_jogo, set_status_jogo) = signal("Conectando...".to_string());
 
@@ -60,6 +61,25 @@ pub fn App() -> impl IntoView {
 
     let selected_indices = RwSignal::new(HashSet::new());
     let (ws_sender, set_ws_sender) = signal(Option::<mpsc::UnboundedSender<String>>::None);
+
+    // --- ESTADOS DE CONFIGURAÇÃO ---
+    let (show_settings, set_show_settings) = signal(false);
+    // Caminho padrão inicial
+    let current_theme = RwSignal::new("/assets/cards/PaperCards1.1".to_string());
+    let (show_settings, set_show_settings) = signal(false);
+    let card_scale = RwSignal::new(1.0);
+    let hand_card_width =
+        Signal::derive(move || format!("{}px", (100.0 * card_scale.get()) as i32));
+
+    // --- SINAIS DERIVADOS DE TAMANHO ---
+    // Mão: Base 100px
+    let hand_width = Signal::derive(move || format!("{}px", (100.0 * card_scale.get()) as i32));
+
+    // Board (Monte/Lixo): Base 90px
+    let board_width = Signal::derive(move || format!("{}px", (90.0 * card_scale.get()) as i32));
+
+    // Mesa (Jogos baixados): Base 80px
+    let table_width = Signal::derive(move || format!("{}px", (80.0 * card_scale.get()) as i32));
 
     Effect::new(move |_| {
         let (tx, mut rx) = mpsc::unbounded();
@@ -98,6 +118,13 @@ pub fn App() -> impl IntoView {
                             set_meu_id.set(visao.meu_id);
                             set_mesa_a.set(visao.mesa_time_a);
                             set_mesa_b.set(visao.mesa_time_b);
+
+                            //ATUALIZAÇÃO DO PLACAR
+                            set_pontuacao_a.set(visao.pontuacao_a);
+                            set_pontuacao_b.set(visao.pontuacao_b);
+
+                            set_tres_vermelhos_a.set(visao.tres_vermelho_time_a);
+                            set_tres_vermelhos_b.set(visao.tres_vermelho_time_b);
 
                             let turno = if visao.posso_jogar {
                                 "SUA VEZ!"
@@ -318,7 +345,7 @@ pub fn App() -> impl IntoView {
     };
 
     // Apenas marca visualmente que queremos usar o lixo
-    let toggle_lixo_selecao = move |_| {
+    let toggle_lixo_selecao = move |_: web_sys::MouseEvent| {
         set_lixo_selecionado.update(|v| *v = !*v);
     };
 
@@ -396,127 +423,176 @@ pub fn App() -> impl IntoView {
                     // 1. DIV PRINCIPAL (Container Verde)
                     <div style=move || {
                         let bg = if e_minha_vez() { "#388e3c" } else { "#1b5e20" };
-                        format!("background-color: {}; min-height: 100vh; display: flex; flex-direction: column; font-family: sans-serif; color: white; overflow-x: hidden; transition: background-color 0.5s;", bg)
+                        format!("background-color: {}; height: 100vh; display: flex; flex-direction: column; font-family: sans-serif; color: white; overflow: hidden; transition: background-color 0.5s;", bg)
                     }>
-                        // HEADER
-                        <div style="background: rgba(0,0,0,0.2); padding: 15px; display: flex; justify-content: space-between; align_items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-                            <h1 style="margin: 0; font-size: 1.5rem;">"Buracão Web"</h1>
-                            <div style="text-align: right;">
-                                <strong style="color: #ffeb3b; font-size: 1.2rem;">{move || status_jogo.get()}</strong>
-                                <br/>
-                                <small>"Meu ID: " {move || meu_id.get()}</small>
-                            </div>
+    // --- HEADER ---
+                <div style="
+                flex-shrink: 0; 
+                background: rgba(0,0,0,0.2); 
+                padding: 10px 20px; 
+                display: flex; 
+                justify-content: space-between; 
+                align-items: center; 
+                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            ">
+                    // LADO ESQUERDO: Título, ID e Configuração
+                    <div style="display: flex; flex-direction: column; align-items: flex-start;">
+                        <h1 style="margin: 0; font-size: 1.5rem; line-height: 1.2;">"Buracão Web"</h1>
+
+                        // Linha com ID e Engrenagem
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <small style="opacity: 0.8; font-size: 0.85rem;">"Meu ID: " {move || meu_id.get()}</small>
+
+                            // BOTÃO DE CONFIGURAÇÃO (LIMPO)
+                            <button
+                                on:click=move |_| set_show_settings.set(true)
+                                title="Configurações"
+                                style="
+                                background: transparent; 
+                                border: none; 
+                                cursor: pointer; 
+                                font-size: 1.2rem; /* Tamanho do ícone */
+                                padding: 0; 
+                                line-height: 1;
+                                opacity: 0.7; 
+                                transition: opacity 0.2s, transform 0.2s;
+                            "
+                                // Pequeno efeito hover inline (opcional, pode ser feito via CSS class)
+                                on:mouseenter=move |e| {
+                                    let el = e.target().unwrap().unchecked_into::<web_sys::HtmlElement>();
+                                    let _ = el.style().set_property("opacity", "1");
+                                    let _ = el.style().set_property("transform", "rotate(45deg)");
+                                }
+                                on:mouseleave=move |e| {
+                                    let el = e.target().unwrap().unchecked_into::<web_sys::HtmlElement>();
+                                    let _ = el.style().set_property("opacity", "0.7");
+                                    let _ = el.style().set_property("transform", "rotate(0deg)");
+                                }
+                            >
+                                "⚙️"
+                            </button>
                         </div>
+                    </div>
 
-                        // 2. ÁREA CENTRAL
-                        <div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-start; align-items: center; padding: 10px;">
+                    // LADO DIREITO: Status e Placar
+                    <div style="text-align: right; display: flex; gap: 20px; align-items: center;">
+                        <div>
+                            <strong style="color: #ffeb3b; font-size: 1.1rem; text-shadow: 1px 1px 2px black; display: block;">
+                                {move || status_jogo.get()}
+                            </strong>
 
-    // MESA
-                    {move || {
-                        let sou_time_a = meu_id.get() % 2 == 0;
-
-                        // Definimos as variáveis explicitamente como Option<Callback<usize>>
-                        let (cb_a, cb_b): (Option<Callback<usize>>, Option<Callback<usize>>) = if sou_time_a {
-                            (Some(Callback::new(acao_ajuntar)), None)
-                        } else {
-                            (None, Some(Callback::new(acao_ajuntar)))
-                        };
-
-                        view! {
-                            <Table
-                                jogos_time_a=mesa_a
-                                jogos_time_b=mesa_b
-                                on_click_jogo_a=cb_a
-                                on_click_jogo_b=cb_b
-                            />
-                        }
-                    }}
-
-            // TABULEIRO
-                            <Board
-                                lixo=lixo_topo
-                                lixo_selecionado=lixo_selecionado // <--- Passando o sinal
-                                on_click_deck=Some(Callback::new(move |_| acao_comprar_monte(())))
-                                on_click_trash=Some(Callback::new(toggle_lixo_selecao)) // <--- Mudamos a ação aqui
-                            />
-
-            // ÁREA DE CONFIRMAÇÃO DO LIXO
+                            // INDICADOR DE VEZ DO JOGADOR
                             {move || {
-                                if lixo_selecionado.get() {
-                                    let qtd_ajuntes = ajuntes_lixo_preparados.get().len();
-
-                                    view! {
-                                        <div style="margin: 10px; padding: 10px; background: rgba(255, 193, 7, 0.2); border: 1px solid #ffc107; border-radius: 8px; text-align: center; backdrop-filter: blur(5px);">
-                                            <strong style="color: #ffc107; display: block; margin-bottom: 5px;">"MODO: COMPRAR LIXO"</strong>
-
-                                            <ul style="text-align: left; color: white; font-size: 12px; list-style: none; padding: 0;">
-                                                <li>"1. Selecione cartas e clique na Mesa para ajuntar."</li>
-                                                <li>"2. Ou selecione cartas e clique em Confirmar para baixar novo jogo."</li>
-                                            </ul>
-
-                                            {if qtd_ajuntes > 0 {
-                                                view! { <div style="color: #69f0ae; margin: 5px 0;">{format!("{} ajunte(s) preparado(s) na mesa!", qtd_ajuntes)}</div> }.into_any()
-                                            } else {
-                                                view! {}.into_any()
-                                            }}
-
-                                            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 10px;">
-                                                <button
-                                                    on:click=confirmar_compra_lixo
-                                                    style="background: #ffc107; color: black; border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold; cursor: pointer;"
-                                                >
-                                                    "CONFIRMAR TUDO"
-                                                </button>
-                                                <button
-                                                    on:click=move |_| {
-                                                        // Cancelar limpa tudo
-                                                        set_lixo_selecionado.set(false);
-                                                        set_ajuntes_lixo_preparados.set(Vec::new());
-                                                        selected_indices.update(|s| s.clear());
-                                                    }
-                                                    style="background: transparent; color: #ffc107; border: 1px solid #ffc107; padding: 8px 16px; border-radius: 4px; cursor: pointer;"
-                                                >
-                                                    "Cancelar"
-                                                </button>
-                                            </div>
-                                        </div>
-                                    }.into_any()
+                                let vez = turno_atual_id.get();
+                                if vez != meu_id.get() {
+                                    view! { <span style="font-size: 11px; color: #ccc;">"Vez do Jogador: " {vez}</span> }.into_any()
                                 } else {
                                     view! {}.into_any()
                                 }
                             }}
+                        </div>
 
-                            // ÁREA DE PREPARAÇÃO (Jogos a Baixar)
+                        <Scoreboard
+                            pontuacao_a=pontuacao_a
+                            pontuacao_b=pontuacao_b
+                        />
+                    </div>
+                </div>
+
+                        // --- 2. ÁREA CENTRAL (Mesas e Board) ---
+                        <div style="
+                flex: 1; 
+                display: flex; 
+                flex-direction: row; 
+                justify-content: space-between; 
+                align-items: flex-start;
+                padding: 20px; 
+                gap: 20px;
+                overflow-y: auto;
+            ">
+                            // MESA TIME A
+                            {move || {
+                                let sou_time_a = meu_id.get() % 2 == 0;
+                                let cb = if sou_time_a { Some(Callback::new(acao_ajuntar)) } else { None };
+
+                                view! {
+                                    <Table
+                                        titulo="MESA TIME A".to_string()
+                                        jogos=mesa_a  // <--- CORREÇÃO 1: Nome da propriedade é 'jogos'
+                                        tres_vermelhos=tres_vermelhos_a
+                                        on_click=cb
+                                        theme=current_theme.get()
+                                        card_width=table_width
+                                    />
+                                }
+                            }}
+
+            // TABULEIRO (Monte e Lixo)
+                            <div style="flex-shrink: 0; margin-top: 40px;">
+                                <Board
+                                    lixo=lixo_topo
+                                    lixo_selecionado=lixo_selecionado
+                                    on_click_deck=Some(Callback::new(move |_| acao_comprar_monte(())))
+                                    // Usando a variável corrigida aqui:
+                                    on_click_trash=Some(Callback::new(toggle_lixo_selecao))
+                                    theme=current_theme.get()
+                                    card_width=board_width
+                                />
+                            </div>
+
+                            // MESA TIME B
+                            {move || {
+                                let sou_time_b = meu_id.get() % 2 != 0;
+                                let cb = if sou_time_b { Some(Callback::new(acao_ajuntar)) } else { None };
+
+                                view! {
+                                    <Table
+                                        titulo="MESA TIME B".to_string()
+                                        jogos=mesa_b // <--- CORREÇÃO 1: Nome da propriedade é 'jogos'
+                                        tres_vermelhos=tres_vermelhos_b
+                                        on_click=cb
+                                        theme=current_theme.get()
+                                        card_width=table_width
+                                    />
+                                }
+                            }}
+                        </div>
+
+                        // --- 3. ÁREA INFERIOR (Mão e Ações) ---
+                        <div style="
+                flex-shrink: 0; 
+                background: linear-gradient(to top, rgba(0,0,0,0.9) 20%, transparent); 
+                padding-bottom: 20px;
+                position: relative;
+                z-index: 10;
+            ">
+
+                            // ÁREA DE PREPARAÇÃO (Flutuante sobre a mão)
                             {move || {
                                 let jogos = jogos_preparados.get();
                                 if !jogos.is_empty() {
                                     view! {
-                                        <div style="background: rgba(0,0,0,0.3); width: 90%; margin: 10px 0; padding: 10px; border-radius: 10px; border: 2px dashed #ffeb3b; text-align: center;">
-                                            <h4 style="margin: 0 0 10px 0; color: #ffeb3b;">"Jogos a Baixar"</h4>
-
-                                            <div style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; margin-bottom: 10px;">
-                                                {jogos.into_iter().enumerate().map(|(idx, cartas)| {
-                                                    view! {
-                                                        <div
-                                                            on:click=move |_| acao_devolver(idx)
-                                                            style="background: rgba(255,255,255,0.1); padding: 5px; border-radius: 8px; cursor: pointer; display: flex;"
-                                                            title="Devolver para mão"
-                                                        >
-                                                        {cartas.into_iter().map(|c| view! { <CardImage carta=c /> }).collect::<Vec<_>>()}
-
-                                                            // Espaçador para o final do jogo
-                                                            <div style="width: 20px;"></div>
-                                                        </div>
-                                                    }
-                                                }).collect::<Vec<_>>()}
+                                        <div style="display: flex; justify-content: center; margin-bottom: 10px;">
+                                            <div style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px; border: 1px dashed #ffeb3b; text-align: center;">
+                                                <h4 style="margin: 0 0 10px 0; color: #ffeb3b; font-size: 12px;">"Jogos a Baixar"</h4>
+                                                <div style="display: flex; gap: 10px;">
+                                                    {jogos.into_iter().enumerate().map(|(idx, cartas)| {
+                                                        view! {
+                                                            <div on:click=move |_| acao_devolver(idx) style="cursor: pointer; display: flex; transform: scale(0.8);">
+                                                                {cartas.into_iter().map(|c| view! {<CardImage
+            carta=c
+            width="40px"
+            theme=current_theme.get() // <--- ADICIONE ISTO
+        />}).collect::<Vec<_>>()}
+                                                            </div>
+                                                        }
+                                                    }).collect::<Vec<_>>()}
+                                                </div>
+                                                // CORREÇÃO 4: Botão usa callback com MouseEvent para evitar erro de tipo
+                                                <button on:click=move |ev| acao_confirmar_baixa(ev) style="margin-top: 5px; background: #2e7d32; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer;">
+                                                    "Confirmar"
+                                                </button>
                                             </div>
-
-                                            <button
-                                                on:click=acao_confirmar_baixa
-                                                style="background: #2e7d32; color: white; border: none; padding: 10px 30px; border-radius: 5px; cursor: pointer; font-weight: bold;"
-                                            >
-                                                "CONFIRMAR BAIXA"
-                                            </button>
                                         </div>
                                     }.into_any()
                                 } else {
@@ -524,45 +600,50 @@ pub fn App() -> impl IntoView {
                                 }
                             }}
 
-                            // BOTÕES DE AÇÃO
-                            <div style="display: flex; gap: 20px; margin-top: 10px;">
-                                 <button
-                                    on:click=acao_descartar
-                                    style="padding: 12px 30px; font-size: 16px; font-weight: bold; background-color: #e53935; color: white; border: none; border-radius: 25px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3);"
-                                >
-                                    "Descartar"
-                                 </button>
+                            // CONTAINER FLEX: CONTROLES + MÃO
+                            <div style="display: flex; align-items: flex-end; gap: 20px; width: 100%; overflow: hidden; padding: 0 20px;">
 
-                                 <button
-                                    on:click=acao_separar
-                                    style="padding: 12px 30px; font-size: 16px; font-weight: bold; background-color: #0288d1; color: white; border: none; border-radius: 25px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3);"
-                                >
-                                    "Separar Jogo"
-                                 </button>
-                            </div>
-                        </div>
+                                // CONTROLES
+                                <div style="flex-shrink: 0; margin-bottom: 20px;">
+                                    <GameControls
+                                        lixo_selecionado=lixo_selecionado
+                                        tem_jogos_preparados=Signal::derive(move || !jogos_preparados.get().is_empty())
 
-                        // 3. MÃO DO JOGADOR
-                        <div style="background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); padding-bottom: 20px;">
-                            <div style="display: flex; justify-content: center; margin-bottom: 5px;">
-                                 <button
-                                    on:click=acao_organizar
-                                    style="padding: 5px 15px; font-size: 12px; background-color: #fbc02d; color: #333; border: none; border-radius: 15px; cursor: pointer; font-weight: bold;"
-                                 >
-                                    "Ordenar Cartas"
-                                 </button>
-                            </div>
-
-                            {move || {
-                                let _mao = minha_mao.get();
-                                view! {
-                                    <Hand
-                                        cartas=minha_mao
-                                        selected_indices=selected_indices
-                                        card_width="110px"
+                                        on_descartar=Callback::new(acao_descartar)
+                                        on_separar=Callback::new(acao_separar)
+                                        on_ordenar=Callback::new(acao_organizar)
+                                        on_confirmar_lixo=Callback::new(confirmar_compra_lixo)
+                                        on_confirmar_baixa=Callback::new(acao_confirmar_baixa)
+                                        on_cancelar_lixo=Callback::new(move |_| {
+                                            set_lixo_selecionado.set(false);
+                                            set_ajuntes_lixo_preparados.set(Vec::new());
+                                            selected_indices.update(|s| s.clear());
+                                        })
                                     />
-                                }
-                            }}
+                                </div>
+
+                                // MÃO
+                                <div style="flex-grow: 1; min-width: 0;">
+                                    {move || {
+                                        let _mao = minha_mao.get();
+                                        view! {
+                                            <Hand
+                                                cartas=minha_mao
+                                                card_width=hand_card_width // Tamanho dinâmico
+                                                theme=current_theme.get()  // Tema dinâmico
+                                                selected_indices=selected_indices
+                                            />
+                                        }
+                                    }}
+                                </div>
+                                <SettingsModal
+                                    show=show_settings
+                                    on_close=Callback::new(move |_| set_show_settings.set(false))
+                                    current_theme_path=current_theme
+                                    card_scale=card_scale
+                                />
+
+                            </div>
                         </div>
                     </div>
                 }
