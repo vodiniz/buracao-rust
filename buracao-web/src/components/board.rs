@@ -7,14 +7,18 @@ use leptos::prelude::*;
 pub fn Board(
     #[prop(into)] lixo: Signal<Option<Carta>>,
     #[prop(into)] lixo_selecionado: Signal<bool>,
+    // 1. Recebe o tema do App corretamente aqui
+    #[prop(into)] theme: String,
+    #[prop(into)] card_width: Signal<String>,
+    #[prop(into)] qtd_monte: Signal<u32>,
+    #[prop(into)] qtd_lixo: Signal<u32>,
+    #[prop(into)] verso_monte: Signal<String>,
     #[prop(default = None)] on_click_deck: Option<Callback<web_sys::MouseEvent>>,
     #[prop(default = None)] on_click_trash: Option<Callback<web_sys::MouseEvent>>,
-    #[prop(optional, into, default = "/assets/cards/PaperCards1.1".to_string())] theme: String,
-
-    // IMPORTANTE: Recebe Signal<String> para reagir às mudanças
-    #[prop(into, default = "90px".to_string().into())] card_width: Signal<String>,
 ) -> impl IntoView {
-    let no_selection = Signal::derive(|| None);
+    // Helpers
+    // Usamos tipagem explícita no None para ajudar o compilador
+    let no_selection = Signal::derive(|| Option::<usize>::None);
     let selection_lixo_visual = Signal::derive(move || {
         if lixo_selecionado.get() {
             Some(1)
@@ -22,6 +26,12 @@ pub fn Board(
             None
         }
     });
+
+    // 2. PREPARAÇÃO DO TEMA (CRUCIAL):
+    // Precisamos clonar a string para passar para dois componentes diferentes (Monte e Lixo).
+    // Se não fizermos isso e não passarmos no <Card>, ele usa o padrão "PaperCards1.1".
+    let theme_monte = theme.clone();
+    let theme_lixo = theme.clone();
 
     view! {
         <div style="
@@ -35,45 +45,52 @@ pub fn Board(
         ">
             // --- MONTE ---
             <div style="text-align: center;">
-                <span style="color: white; font-size: 11px; margin-bottom: 5px; display: block; opacity: 0.7;">"Monte"</span>
+                <span style="color: white; font-size: 11px; margin-bottom: 5px; display: block; opacity: 0.7;">
+                    "Monte (" {move || qtd_monte.get()} ")"
+                </span>
                 <Card
-                    id="back_r".to_string()
-                    // Passa o sinal direto. O Card já sabe lidar com ele.
+                    id=verso_monte
                     width=card_width
+
+                    // A CORREÇÃO ESTÁ AQUI:
+                    theme=theme_monte
+
                     selection_group=no_selection
                     on_click=on_click_deck
-                    theme=theme.clone()
                 />
             </div>
 
             // --- LIXO ---
             <div style="text-align: center;">
-                <span style="color: white; font-size: 11px; margin-bottom: 5px; display: block; opacity: 0.7;">"Lixo"</span>
+                <span style="color: white; font-size: 11px; margin-bottom: 5px; display: block; opacity: 0.7;">
+                    "Lixo (" {move || qtd_lixo.get()} ")"
+                </span>
+
                 {move || match lixo.get() {
                     Some(carta) => view! {
                         <div style="opacity: 1.0; transition: opacity 0.3s;">
                             <Card
                                 id=carta_para_asset(&carta)
-                                // Passa o sinal direto para a carta do lixo
                                 width=card_width
+
+                                // A CORREÇÃO NO LIXO TAMBÉM:
+                                theme=theme_lixo.clone()
+
                                 selection_group=selection_lixo_visual
                                 on_click=on_click_trash
-                                theme=theme.clone()
                             />
                         </div>
                     }.into_any(),
                     None => view! {
-                        // --- CORREÇÃO DO VAZIO ---
-                        // Usamos `style=move ||` para recalcular o CSS quando card_width mudar.
                         <div style=move || format!("
                             width: {}; 
-                            height: calc({} * 1.45); /* 1.45 mantém a proporção padrão de carta */
+                            height: calc({} * 1.45); 
                             border: 2px dashed rgba(255,255,255,0.3); 
                             border-radius: 8px;
                             display: flex; align-items: center; justify-content: center;
                             color: rgba(255,255,255,0.5); font-size: 11px;
                             transition: width 0.1s, height 0.1s;
-                        ", card_width.get(), card_width.get())> // <--- .get() aqui é crucial
+                        ", card_width.get(), card_width.get())>
                             "Vazio"
                         </div>
                     }.into_any()

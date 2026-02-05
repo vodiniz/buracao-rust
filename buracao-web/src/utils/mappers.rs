@@ -1,4 +1,4 @@
-use buracao_core::baralho::{Carta, Naipe, Valor};
+use buracao_core::baralho::{Carta, Naipe, Valor, Verso};
 use std::collections::HashMap;
 
 pub fn carta_para_asset(carta: &Carta) -> String {
@@ -32,6 +32,40 @@ pub fn carta_para_asset(carta: &Carta) -> String {
     }
 
     format!("{}_{}", naipe_str, valor_str)
+}
+
+pub enum StatusCanastra {
+    Normal, // Menos de 7 cartas
+    Real,   // 7+ cartas, sem coringuinha (2), permite Joker
+    Suja,   // 7+ cartas, com coringuinha (2)
+}
+
+pub fn analisar_status_canastra(cartas: &[Carta]) -> StatusCanastra {
+    if cartas.len() < 7 {
+        return StatusCanastra::Normal;
+    }
+
+    // A regra da Suja é: ter um 2 (Coringuinha)
+    // Nota: O método eh_coringa() que você mencionou verifica se é Valor::Dois
+    let tem_coringuinha = cartas.iter().any(|c| c.valor == Valor::Dois);
+
+    if tem_coringuinha {
+        StatusCanastra::Suja
+    } else {
+        // Se tem 7+ e não tem 2, é Real (mesmo se tiver Joker, conforme sua regra)
+        StatusCanastra::Real
+    }
+}
+
+pub fn verso_para_asset(verso: Option<Verso>) -> String {
+    match verso {
+        // CORREÇÃO: Usando os nomes exatos do seu Enum (Red/Blue)
+        Some(Verso::Blue) => "back_b".to_string(),
+        Some(Verso::Red) => "back_r".to_string(),
+
+        // Fallback caso seja None
+        None => "back_r".to_string(),
+    }
 }
 
 // pub fn carta_para_asset_path(carta: &Carta) -> String {

@@ -1,7 +1,8 @@
 use crate::acoes::AcaoJogador;
 use crate::acoes::{DetalheJogo, VisaoJogador};
-use crate::baralho::{Baralho, Carta}; // Importa do módulo vizinho
+use crate::baralho::{self, Baralho, Carta}; // Importa do módulo vizinho
 use crate::regras::{tem_coringa, validar_jogo};
+use crate::Verso;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap; // Importa as funções puras
 
@@ -25,12 +26,19 @@ pub struct EstadoJogo {
     pub proximo_id_jogo: u32,
     pub baralho_acabou_nesta_rodada: bool,
     pub comprou_nesta_rodada: bool,
+    pub qtd_monte: u32,
+    pub qtd_lixo: u32,
+    pub verso_topo: Option<Verso>,
 }
 
 impl EstadoJogo {
     pub fn new() -> Self {
+        let mut baralho_inicial = Baralho::new();
+        baralho_inicial.shuffle(); // Opcional: embaralhar logo no início se quiser
+
+        let verso_inicial = baralho_inicial.cartas.last().map(|c| c.verso);
         Self {
-            baralho: Baralho::new(),
+            baralho: baralho_inicial,
             maos: vec![Vec::new(); 4],
             turno_atual: 0,
             lixo: Vec::new(),
@@ -46,6 +54,9 @@ impl EstadoJogo {
             proximo_id_jogo: 0,
             baralho_acabou_nesta_rodada: false,
             comprou_nesta_rodada: false,
+            qtd_monte: 0,
+            qtd_lixo: 0,
+            verso_topo: verso_inicial,
         }
     }
 
@@ -96,6 +107,8 @@ impl EstadoJogo {
             let jogador_idx = (self.rodada as usize + i) % 4;
             self.processar_tres_vermelhos(jogador_idx);
         }
+        self.qtd_monte = self.baralho.cartas.len() as u32;
+        self.verso_topo = self.baralho.cartas.last().map(|c| c.verso.clone());
     }
 
     pub fn processar_tres_vermelhos(&mut self, jogador_id: usize) {
@@ -447,6 +460,7 @@ impl EstadoJogo {
         // Ao mover o lixo para a mão, garantimos que o .remove(pos) abaixo vai encontrar a carta.
         let mut cartas_lixo = self.lixo.drain(..).collect::<Vec<Carta>>();
         self.maos[jogador_idx].append(&mut cartas_lixo);
+        self.qtd_lixo = self.lixo.len() as u32;
 
         // B. Processar Novos Jogos
         for jogo in novos_jogos {
@@ -688,6 +702,8 @@ impl EstadoJogo {
                 // Define status para permitir jogar/descartar
                 // (Assumindo que você criou o enum StatusTurno sugerido antes, senão ignore esta linha)
                 // self.status_turno = StatusTurno::PodeJogarOuDescartar;
+                self.qtd_monte = self.baralho.cartas.len() as u32;
+                self.verso_topo = self.baralho.cartas.last().map(|c| c.verso);
                 return Ok(c);
             }
         }
@@ -788,6 +804,7 @@ impl EstadoJogo {
         self.turno_atual = (self.turno_atual + 1) % 4;
         self.pegou_lixo_nesta_rodada = false;
         self.comprou_nesta_rodada = false;
+        self.qtd_lixo = self.lixo.len() as u32;
         Ok(())
     }
 
@@ -927,6 +944,10 @@ impl EstadoJogo {
             rodada: self.rodada,
 
             cartas_no_monte: self.baralho.restantes(),
+
+            qtd_lixo: self.qtd_lixo,
+            qtd_monte: self.qtd_monte,
+            verso_topo: self.verso_topo.clone(),
             // Assumindo que você tem lógica de morto, senão hardcode false
         }
     }
@@ -965,6 +986,10 @@ impl EstadoJogo {
             turno_atual: self.turno_atual,
             rodada: self.rodada, // (assumindo que você tem contador de rodada)
             cartas_no_monte: self.baralho.restantes(),
+
+            qtd_lixo: self.qtd_lixo,
+            qtd_monte: self.qtd_monte,
+            verso_topo: self.verso_topo.clone(),
         }
     }
 
@@ -988,19 +1013,26 @@ impl EstadoJogo {
         // Limpa mesas
         self.jogos_time_a.clear();
         self.jogos_time_b.clear();
-
         // Recria baralho e lixo
         self.baralho = Baralho::new(); // Ou sua lógica de criar baralho embaralhado
+        self.maos.clear();
+        self.turno_atual = 0; // Começa o jogador 0 de novo (ou quem ganhou)
         self.lixo.clear();
 
         self.dar_cartas();
 
-        // Reseta variáveis de controle
-        self.turno_atual = 0; // Começa o jogador 0 de novo (ou quem ganhou)
         self.rodada = 0;
         self.comprou_nesta_rodada = false;
+        self.tres_vermelhos_time_a.clear();
+        self.tres_vermelhos_time_b.clear();
         self.pegou_lixo_nesta_rodada = false;
-        self.proximo_id_jogo = 0;
+
         self.partida_encerrada = false;
+        self.proximo_id_jogo += 1;
+        self.baralho_acabou_nesta_rodada = false;
+        self.comprou_nesta_rodada = false;
+        self.qtd_monte = self.baralho.cartas.len() as u32;
+        self.qtd_lixo = 0;
+        self.verso_topo = self.baralho.cartas.last().map(|c| c.verso);
     }
 }

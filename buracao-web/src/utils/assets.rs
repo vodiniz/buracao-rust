@@ -1,5 +1,5 @@
 // Caminho base configurado no Trunk ou servidor de arquivos
-const CARDS_BASE_PATH: &str = "/assets/cards/PaperCards1.1";
+const CARDS_BASE_PATH: &str = "/assets/cards/PaperCards";
 
 #[derive(Clone, Copy)]
 pub enum CardTheme {
@@ -10,15 +10,19 @@ pub enum CardTheme {
 impl CardTheme {
     pub fn folder(&self) -> &str {
         match self {
-            CardTheme::Paper => "/assets/cards/PaperCards1.1",
+            CardTheme::Paper => "/assets/cards/PaperCards",
         }
     }
 }
 
 /// Gera o caminho para a carta baseada no ID e no TEMA fornecido.
-pub fn get_card_path(card_id: &str, theme_folder: &str) -> String {
-    // theme_folder ex: "assets/cards/PaperCards1.1"
-    format!("{}/{}.png", theme_folder, card_id)
+pub fn get_card_path(nome: &str, tema: &str) -> String {
+    // Se o tema não termina com /, a gente adiciona
+    if tema.ends_with('/') {
+        format!("{}{}.png", tema, nome)
+    } else {
+        format!("{}/{}.png", tema, nome) // <--- Garante a barra aqui
+    }
 }
 
 /// Gera o caminho para o verso (Back) baseado no TEMA.

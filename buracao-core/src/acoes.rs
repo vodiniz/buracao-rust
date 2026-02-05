@@ -1,4 +1,4 @@
-use crate::baralho::Carta;
+use crate::baralho::{Carta, Verso};
 use serde::{Deserialize, Serialize}; // Atenção: Pode precisar de ajuste circular se Visao usar Estado
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -92,6 +92,11 @@ pub struct VisaoJogador {
 
     // 5. Metadados do Baralho
     pub cartas_no_monte: usize,
+
+    pub qtd_monte: u32,
+    pub qtd_lixo: u32,
+
+    pub verso_topo: Option<Verso>,
 }
 
 // Uma representação simplificada de um jogo na mesa para o frontend

@@ -175,11 +175,10 @@ impl Baralho {
         let mut cartas = Vec::new();
 
         // Buraco usa 2 baralhos
-        for verso in [Verso::Red, Verso::Blue] {
+        for verso_atual in [Verso::Red, Verso::Blue] {
             // Adiciona as cartas normais (A a K)
             for naipe in [Naipe::Copas, Naipe::Ouros, Naipe::Espadas, Naipe::Paus] {
                 for valor in [
-                    Valor::As,
                     Valor::Dois,
                     Valor::Tres,
                     Valor::Quatro,
@@ -192,11 +191,12 @@ impl Baralho {
                     Valor::Valete,
                     Valor::Dama,
                     Valor::Rei,
+                    Valor::As,
                 ] {
                     cartas.push(Carta {
                         naipe,
                         valor,
-                        verso,
+                        verso: verso_atual,
                     });
                 }
             }
@@ -204,12 +204,12 @@ impl Baralho {
             cartas.push(Carta {
                 naipe: Naipe::Nenhum,
                 valor: Valor::Joker,
-                verso: Verso::Red,
+                verso: verso_atual,
             });
             cartas.push(Carta {
                 naipe: Naipe::Nenhum,
                 valor: Valor::Joker,
-                verso: Verso::Blue,
+                verso: verso_atual,
             });
         }
 

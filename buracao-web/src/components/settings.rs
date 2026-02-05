@@ -36,7 +36,9 @@ pub fn SettingsModal(
                                 style="width: 100%; padding: 10px; background: #333; color: white; border: 1px solid #555; border-radius: 6px; outline: none;"
                             >
                                 // O value deve ser o caminho da pasta dentro de public/
-                                <option value="/assets/cards/PaperCards1.1">"Clássico (Papel)"</option>
+                                <option value="/assets/cards/PaperCards">"Clássico (Papel)"</option>
+                                <option value="/assets/cards/Kortit">"Kortit"</option>
+                                <option value="/assets/cards/PixelCards">"Pixel Cards"</option>
 
                                 // Exemplo futuro (se você criar a pasta):
                                 // <option value="/assets/cards/PixelArt">"Pixel Art"</option>
