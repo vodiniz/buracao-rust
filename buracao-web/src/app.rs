@@ -84,8 +84,17 @@ pub fn App() -> impl IntoView {
         set_ws_sender.set(Some(tx));
 
         spawn_local(async move {
-            let ws_url = "ws://127.0.0.1:3030/buraco";
-            let ws = match WebSocket::open(ws_url) {
+            let ws_url = {
+                let location = window().location();
+                let protocol = if location.protocol().unwrap() == "https:" {
+                    "wss"
+                } else {
+                    "ws"
+                };
+                let host = location.host().unwrap(); // Isso pega "localhost:3030" automaticamente
+                format!("{}://{}/buraco", protocol, host)
+            };
+            let ws = match WebSocket::open(&ws_url) {
                 Ok(ws) => ws,
                 Err(e) => {
                     leptos::logging::error!("Erro WS: {:?}", e);
