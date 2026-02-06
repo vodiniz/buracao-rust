@@ -19,6 +19,7 @@ pub struct EstadoJogo {
     pub pontuacao_a: i32,
     pub pontuacao_b: i32,
     pub rodada: u32,
+    pub numero_partida: u32,
     pub tres_vermelhos_time_a: Vec<Carta>,
     pub tres_vermelhos_time_b: Vec<Carta>,
     pub pegou_lixo_nesta_rodada: bool,
@@ -47,6 +48,7 @@ impl EstadoJogo {
             pontuacao_a: 0,
             pontuacao_b: 0,
             rodada: 0,
+            numero_partida: 0,
             tres_vermelhos_time_a: Vec::new(),
             tres_vermelhos_time_b: Vec::new(),
             pegou_lixo_nesta_rodada: false,
@@ -62,11 +64,14 @@ impl EstadoJogo {
 
     pub fn preparar_proxima_rodada(&mut self) {
         // 1. Alterna quem começa (baseado na rodada anterior)
-        self.rodada += 1; // Incrementa contador global de rodadas
+        self.numero_partida += 1;
+
+        self.rodada = 0; // Incrementa contador global de rodadas
 
         // A Regra 2 diz que muda quem começa.
         // Se rodada 0 começou o jogador 0.
         // Rodada 1 começa o jogador 1, etc.
+        //
         self.turno_atual = self.rodada % 4;
 
         // 2. Limpa a mesa

@@ -16,6 +16,7 @@ use crate::components::notification::{NotificationToast, Toast, ToastType};
 use crate::components::scoreboard::Scoreboard;
 use crate::components::settings::SettingsModal;
 use crate::components::table::Table;
+use crate::components::turn_indicator::TurnIndicator; // <--- IMPORTAR
 
 use crate::utils::assets::get_card_path;
 use crate::utils::mappers::{carta_para_asset, verso_para_asset};
@@ -554,7 +555,6 @@ pub fn App() -> impl IntoView {
                     />
                 </div>
             </div>
-
             // --- 2. ÁREA CENTRAL (Mesas e Board) ---
             <div style="
                 flex: 1;
@@ -570,10 +570,10 @@ pub fn App() -> impl IntoView {
                 {move || {
                     let sou_time_a = meu_id.get() % 2 == 0;
                     let cb = if sou_time_a { Some(Callback::new(acao_ajuntar)) } else { None };
-
+                    let titulo = if sou_time_a { "MEU TIME" } else { "TIME INIMIGO" };
                     view! {
                         <Table
-                            titulo="MESA TIME A".to_string()
+                            titulo=titulo.to_string()
                             jogos=mesa_a
                             tres_vermelhos=tres_vermelhos_a
                             on_click=cb
@@ -584,8 +584,16 @@ pub fn App() -> impl IntoView {
                     }
                 }}
 
-                // TABULEIRO (Monte e Lixo)
-                <div style="flex-shrink: 0; margin-top: 40px;">
+                // --- COLUNA CENTRAL (Board + Indicador) ---
+                // Esta div agrupa os elementos verticalmente no centro
+                <div style="
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 20px; /* Espaço entre o Lixo e a Bolinha */
+                    flex-shrink: 0;
+                    margin-top: 40px;
+                ">
                     <Board
                         lixo=lixo_topo
                         lixo_selecionado=lixo_selecionado
@@ -597,16 +605,29 @@ pub fn App() -> impl IntoView {
                         qtd_lixo=qtd_lixo
                         verso_monte=verso_monte
                     />
+
+                    // O Indicador agora está DENTRO da coluna central, logo abaixo do Board
+                    <div style="
+                        background: rgba(0,0,0,0.2); 
+                        padding: 10px; 
+                        border-radius: 50%;
+                        border: 1px solid rgba(255,255,255,0.1);
+                    ">
+                        <TurnIndicator
+                            my_id=meu_id
+                            current_turn=turno_atual_id
+                        />
+                    </div>
                 </div>
 
                 // MESA TIME B
                 {move || {
                     let sou_time_b = meu_id.get() % 2 != 0;
                     let cb = if sou_time_b { Some(Callback::new(acao_ajuntar)) } else { None };
-
+                    let titulo = if sou_time_b { "MEU TIME" } else { "TIME INIMIGO" };
                     view! {
                         <Table
-                            titulo="MESA TIME B".to_string()
+                            titulo=titulo.to_string()
                             jogos=mesa_b
                             tres_vermelhos=tres_vermelhos_b
                             on_click=cb

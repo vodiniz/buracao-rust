@@ -115,21 +115,25 @@ pub fn organizar_para_exibicao(cartas: &[Carta]) -> Vec<Carta> {
         return vec![];
     }
 
+    // 1. Descobre o naipe (mantido para compatibilidade, embora não crítico para essa lógica visual específica)
     let naipe_dominante = descobrir_naipe_dominante(cartas);
+
     let mut naturais = Vec::new();
     let mut curingas = Vec::new();
 
+    // 2. CLASSIFICAÇÃO RIGOROSA (A CORREÇÃO DO BUG VISUAL)
+    // Tratamos TODOS os 2 como curingas para fins de ordenação visual.
+    // Isso impede que um 2 "natural" seja ordenado numericamente antes do 3 ou 4,
+    // o que causaria o bug visual de aparecer no meio ou início errado.
     for c in cartas {
-        if c.valor == Valor::Joker {
-            curingas.push(c.clone());
-        } else if c.valor == Valor::Dois && Some(c.naipe) != naipe_dominante {
+        if c.valor == Valor::Joker || c.valor == Valor::Dois {
             curingas.push(c.clone());
         } else {
             naturais.push(c.clone());
         }
     }
 
-    // HELPER: Ás vale 14 visualmente
+    // Helper: Ás vale 14 para ficar no topo
     let valor_visual = |c: &Carta| -> u8 {
         match c.valor {
             Valor::As => 14,
@@ -137,22 +141,24 @@ pub fn organizar_para_exibicao(cartas: &[Carta]) -> Vec<Carta> {
         }
     };
 
+    // Se só tem curingas, retorna eles
     if naturais.is_empty() {
         let mut t = curingas;
         t.sort_by_key(|c| valor_visual(c));
         return t;
     }
 
+    // 3. Ordena os naturais (Ex: 8, 9, 10, J)
     naturais.sort_by_key(|c| valor_visual(c));
 
-    // Trinca (lavadeira)
-    if naturais.first().unwrap().valor == naturais.last().unwrap().valor {
+    // Verifica Lavadeira (Trinca de valores iguais)
+    if naturais.len() >= 2 && naturais.first().unwrap().valor == naturais.last().unwrap().valor {
         let mut r = naturais;
         r.append(&mut curingas);
         return r;
     }
 
-    // Sequência (Lógica de preencher buracos)
+    // 4. PREENCHIMENTO DE LACUNAS (BURACOS)
     let mut resultado = Vec::new();
     let mut anterior = naturais[0].clone();
     resultado.push(anterior.clone());
@@ -167,39 +173,53 @@ pub fn organizar_para_exibicao(cartas: &[Carta]) -> Vec<Carta> {
             0
         };
 
+        // Se gap > 1 (Ex: tem 8 e 10, gap é 2), precisamos de (2-1) = 1 coringa no meio
         if gap > 1 {
-            for _ in 0..(gap - 1) {
+            let buracos_para_tapar = gap - 1;
+            for _ in 0..buracos_para_tapar {
                 if let Some(curinga) = curingas.pop() {
                     resultado.push(curinga);
                 }
             }
         }
+
         resultado.push(carta_atual.clone());
         anterior = carta_atual;
     }
 
-    // --- NOVA LÓGICA DE POSICIONAMENTO DO CORINGA ---
+    // 5. LÓGICA INTELIGENTE DE EXTENSÃO (FIM vs COMEÇO)
+    // Aqui garantimos que ele cresça para o topo (até o Ás) e só depois vá para o início.
 
     if !curingas.is_empty() {
-        // Verifica a última carta colocada na sequência visual
-        if let Some(ultima_carta) = resultado.last() {
-            let valor_ultimo = valor_visual(ultima_carta);
+        // Pega o valor da última carta visualmente inserida
+        let ultima_carta = resultado.last().unwrap();
+        let mut valor_ultimo = valor_visual(ultima_carta);
 
-            // REGRA: Se a sequência termina em Ás (14), não dá pra subir mais.
-            // Então o coringa deve ir para o INÍCIO (antes do 10, ou antes do 4 se estiver completa).
-            // Se termina em qualquer outra carta (ex: Rei, 10, 6), o coringa vai pro FINAL pra continuar crescendo.
-            if valor_ultimo == 14 {
-                // Insere todos os coringas restantes no começo
-                for c in curingas {
-                    resultado.insert(0, c);
-                }
+        // A. Tenta crescer para a DIREITA (até bater no Ás/14)
+        // Ex: Se temos [J, Q] e 2 curingas -> Vira [J, Q, 2(K), 2(A)]
+        let mut i = 0;
+        while i < curingas.len() {
+            if valor_ultimo < 14 {
+                // Adiciona ao final
+                resultado.push(curingas[i].clone());
+                valor_ultimo += 1;
+                i += 1;
             } else {
-                // Comportamento padrão: adiciona ao final
-                resultado.append(&mut curingas);
+                // Bateu no teto (Ás), interrompe. O resto vai pro começo.
+                break;
             }
-        } else {
-            // Fallback (não deve acontecer pois resultado começa com 1 carta)
-            resultado.append(&mut curingas);
+        }
+
+        // Remove do vetor de curingas os que já usamos para crescer pra direita
+        if i > 0 {
+            curingas.drain(0..i);
+        }
+
+        // B. Se AINDA sobraram curingas (ou porque bateu no Ás, ou porque era sequência terminada em Ás)
+        // Insere no começo (crescendo para a esquerda)
+        // Ex: [Q, K, A] e sobrou 1 curinga -> Vira [2(J), Q, K, A]
+        for c in curingas {
+            resultado.insert(0, c);
         }
     }
 

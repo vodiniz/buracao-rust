@@ -7,3 +7,4 @@ pub mod opponents;
 pub mod scoreboard;
 pub mod settings;
 pub mod table;
+pub mod turn_indicator;
