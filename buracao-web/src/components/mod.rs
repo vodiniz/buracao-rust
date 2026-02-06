@@ -2,6 +2,7 @@ pub mod board;
 pub mod card;
 pub mod controls;
 pub mod hand;
+pub mod login;
 pub mod notification;
 pub mod opponents;
 pub mod scoreboard;

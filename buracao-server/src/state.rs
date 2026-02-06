@@ -1,24 +1,51 @@
 use buracao_core::estado::EstadoJogo;
-use dashmap::DashMap;
-use std::sync::{Arc, atomic::AtomicUsize};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
+use warp::ws::Message;
 
-// Tipos públicos para serem usados no main e no handler
-pub type JogoCompartilhado = Arc<RwLock<EstadoJogo>>;
-pub type Clientes = Arc<DashMap<usize, mpsc::UnboundedSender<warp::ws::Message>>>;
+// Tipos para facilitar leitura
+pub type Sender = mpsc::UnboundedSender<Message>;
+pub type RoomCode = String;
+pub type DeviceId = String;
+pub type PlayerId = u32;
 
-// ID Global (Atomic para ser thread-safe)
-pub static NEXT_USER_ID: AtomicUsize = AtomicUsize::new(1);
-
-// Função auxiliar para inicializar o jogo
-pub fn inicializar_jogo() -> JogoCompartilhado {
-    let mut estado_inicial = EstadoJogo::new();
-    println!("🎲 Embaralhando e distribuindo cartas...");
-    estado_inicial.dar_cartas();
-    Arc::new(RwLock::new(estado_inicial))
+// --- ESTRUTURA DE UMA SALA ---
+pub struct Room {
+    pub game_state: EstadoJogo,
+    // Mapeia: ID do Jogador (0, 1, 2, 3) -> Canal de envio do WebSocket dele
+    pub clients: HashMap<PlayerId, Sender>,
+    // Mapeia: DeviceID (LocalStorage) -> ID do Jogador (0, 1, 2, 3)
+    pub sessions: HashMap<DeviceId, PlayerId>,
 }
 
-// Função auxiliar para inicializar a lista de clientes
-pub fn inicializar_clientes() -> Clientes {
-    Arc::new(DashMap::new())
+impl Room {
+    pub fn new() -> Self {
+        Self {
+            game_state: EstadoJogo::new(),
+            clients: HashMap::new(),
+            sessions: HashMap::new(),
+        }
+    }
+}
+
+// --- ESTADO GLOBAL DO SERVIDOR ---
+pub struct ServerState {
+    // Salas Ativas: "SALA-1" -> Dados da Sala
+    pub rooms: HashMap<RoomCode, Arc<RwLock<Room>>>,
+}
+
+impl ServerState {
+    pub fn new() -> Self {
+        Self {
+            rooms: HashMap::new(),
+        }
+    }
+}
+
+// O tipo que será passado para o Warp
+pub type GlobalState = Arc<RwLock<ServerState>>;
+
+pub fn inicializar_servidor() -> GlobalState {
+    Arc::new(RwLock::new(ServerState::new()))
 }

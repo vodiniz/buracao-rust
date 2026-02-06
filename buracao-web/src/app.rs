@@ -12,6 +12,7 @@ use std::time::Duration;
 use crate::components::board::Board;
 use crate::components::controls::GameControls;
 use crate::components::hand::Hand;
+use crate::components::login::LoginScreen;
 use crate::components::notification::{NotificationToast, Toast, ToastType};
 use crate::components::scoreboard::Scoreboard;
 use crate::components::settings::SettingsModal;
@@ -33,6 +34,25 @@ fn CardImage(
     let id = carta_para_asset(&carta);
     let src = get_card_path(&id, &theme);
     view! { <img src=src style=format!("width: {}; height: auto;", width) /> }
+}
+
+fn get_or_create_device_id() -> String {
+    let window = web_sys::window().expect("no global `window` exists");
+
+    // MUDANÇA: Voltamos para local_storage para garantir a persistência real
+    let storage = window
+        .local_storage()
+        .ok()
+        .flatten()
+        .expect("no local storage");
+
+    if let Ok(Some(id)) = storage.get_item("buraco_device_id") {
+        id
+    } else {
+        let new_id = format!("user_{}", rand::random::<u32>());
+        let _ = storage.set_item("buraco_device_id", &new_id);
+        new_id
+    }
 }
 
 #[component]
@@ -85,6 +105,13 @@ pub fn App() -> impl IntoView {
     let (toasts, set_toasts) = signal(Vec::<Toast>::new());
     let next_toast_id = StoredValue::new(0_usize);
 
+    // --- ESTADO DO LOGIN ---
+    let (in_game, set_in_game) = signal(false); // false = Tela de Login, true = Jogo
+    let (player_name, set_player_name) = signal("".to_string());
+    let (room_code, set_room_code) = signal("".to_string());
+    // ID persistente (não muda com refresh)
+    let device_id = StoredValue::new(get_or_create_device_id());
+
     // Agora recebe também o 'tipo'
     let add_toast = move |msg: String, tipo: ToastType| {
         let id = next_toast_id.get_value();
@@ -106,7 +133,43 @@ pub fn App() -> impl IntoView {
         );
     };
 
+    // --- AÇÃO DE ENTRAR (Vem do LoginScreen) ---
+    let ao_entrar = Callback::new(move |(nome, sala): (String, String)| {
+        // 1. Limpa dados visuais da partida anterior (Estado Fantasma)
+        set_minha_mao.set(Vec::new());
+        set_mesa_a.set(Vec::new());
+        set_mesa_b.set(Vec::new());
+        set_jogos_preparados.set(Vec::new());
+        set_status_jogo.set("Conectando à sala...".to_string());
+
+        // 2. Define dados da nova conexão
+        set_player_name.set(nome);
+        set_room_code.set(sala);
+        set_in_game.set(true);
+    });
+
+    let acao_sair = move |_| {
+        set_in_game.set(false);
+        // Força um reload para garantir que o WebSocket morra e a memória limpe
+        let _ = window().location().reload();
+    };
+
+    // 2. Apaga sua identidade e reseta tudo (Vira um novo usuário)
+    let acao_resetar = move |_| {
+        let window = window();
+        if let Ok(Some(storage)) = window.local_storage() {
+            // Apaga o ID do navegador
+            let _ = storage.remove_item("buraco_device_id");
+        }
+        // Recarrega a página (vai gerar um ID novo no próximo load)
+        let _ = window.location().reload();
+    };
+
     Effect::new(move |_| {
+        if !in_game.get() {
+            return;
+        }
+
         let (tx, mut rx) = mpsc::unbounded();
         set_ws_sender.set(Some(tx));
 
@@ -144,6 +207,21 @@ pub fn App() -> impl IntoView {
 
             let (mut write, mut read) = ws.split();
             set_status_jogo.set("Conectado! Aguardando jogo...".to_string());
+
+            let login_msg = serde_json::json!({
+                "tipo": "Login",
+                "device_id": device_id.get_value(),
+                "nome": player_name.get_untracked(),
+                "sala": room_code.get_untracked()
+            });
+
+            leptos::logging::log!(">>> ENVIANDO LOGIN: {}", login_msg.to_string());
+
+            if let Err(e) = write.send(Message::Text(login_msg.to_string())).await {
+                leptos::logging::error!("Falha crítica ao enviar login: {:?}", e);
+                set_status_jogo.set("Erro ao autenticar".to_string());
+                return;
+            }
 
             spawn_local(async move {
                 while let Some(msg_json) = rx.next().await {
@@ -472,261 +550,286 @@ pub fn App() -> impl IntoView {
     };
 
     view! {
-        // 1. DIV PRINCIPAL (Container Verde)
-        <div style=move || {
-            let bg = if e_minha_vez() { "#388e3c" } else { "#1b5e20" };
-            format!("background-color: {}; height: 100vh; display: flex; flex-direction: column; font-family: sans-serif; color: white; overflow: hidden; transition: background-color 0.5s;", bg)
-        }>
-            // --- HEADER ---
-            <div style="
-                flex-shrink: 0;
-                background: rgba(0,0,0,0.2);
-                padding: 10px 20px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            ">
-                // LADO ESQUERDO: Título, ID e Configuração
-                <div style="display: flex; flex-direction: column; align-items: flex-start;">
-                    <h1 style="margin: 0; font-size: 1.5rem; line-height: 1.2;">"Buracão Web"</h1>
 
-                    // Linha com ID e Engrenagem
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <small style="opacity: 0.8; font-size: 0.85rem;">
-                            {move || {
-                                let id = meu_id.get();
-                                let time = if id % 2 == 0 { "Time A" } else { "Time B" };
-                                format!("Meu ID: {} ({})", id, time)
-                            }}
-                        </small>
+        <Show
+        when=move || in_game.get()
+        fallback=move || view! { <LoginScreen on_enter=ao_entrar /> }
+        >
+            // 1. DIV PRINCIPAL (Container Verde)
+            <div style=move || {
+                let bg = if e_minha_vez() { "#388e3c" } else { "#1b5e20" };
+                format!("background-color: {}; height: 100vh; display: flex; flex-direction: column; font-family: sans-serif; color: white; overflow: hidden; transition: background-color 0.5s;", bg)
+            }>
+                // --- HEADER ---
+                <div style="
+                    flex-shrink: 0;
+                    background: rgba(0,0,0,0.2);
+                    padding: 10px 20px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                ">
+                    // LADO ESQUERDO: Título, ID e Configuração
+                    <div style="display: flex; flex-direction: column; align-items: flex-start;">
+                        <h1 style="margin: 0; font-size: 1.5rem; line-height: 1.2;">"Buracão Web"</h1>
 
-                        // BOTÃO DE CONFIGURAÇÃO (LIMPO)
+                        // Linha com ID e Engrenagem
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <small style="opacity: 0.8; font-size: 0.85rem;">
+                                {move || {
+                                    let id = meu_id.get();
+                                    let time = if id % 2 == 0 { "Time A" } else { "Time B" };
+                                    format!("Meu ID: {} ({})", id, time)
+                                }}
+                            </small>
+
+                            // BOTÃO DE CONFIGURAÇÃO (LIMPO)
+                            <button
+                                on:click=move |_| set_show_settings.set(true)
+                                title="Configurações"
+                                style="
+                                    background: transparent;
+                                    border: none;
+                                    cursor: pointer;
+                                    font-size: 1.2rem;
+                                    padding: 0;
+                                    line-height: 1;
+                                    opacity: 0.7;
+                                    transition: opacity 0.2s, transform 0.2s;
+                                "
+                                on:mouseenter=move |e| {
+                                    let el = e.target().unwrap().unchecked_into::<web_sys::HtmlElement>();
+                                    let _ = el.style().set_property("opacity", "1");
+                                    let _ = el.style().set_property("transform", "rotate(45deg)");
+                                }
+                                on:mouseleave=move |e| {
+                                    let el = e.target().unwrap().unchecked_into::<web_sys::HtmlElement>();
+                                    let _ = el.style().set_property("opacity", "0.7");
+                                    let _ = el.style().set_property("transform", "rotate(0deg)");
+                                }
+                            >
+                                "⚙️"
+                            </button>
+                        </div>
+
+                // --- NOVOS BOTÕES ---
+                    <div style="display: flex; flex-direction: row; gap: 5px; margin-left: 15px;">
                         <button
-                            on:click=move |_| set_show_settings.set(true)
-                            title="Configurações"
-                            style="
-                                background: transparent;
-                                border: none;
-                                cursor: pointer;
-                                font-size: 1.2rem;
-                                padding: 0;
-                                line-height: 1;
-                                opacity: 0.7;
-                                transition: opacity 0.2s, transform 0.2s;
-                            "
-                            on:mouseenter=move |e| {
-                                let el = e.target().unwrap().unchecked_into::<web_sys::HtmlElement>();
-                                let _ = el.style().set_property("opacity", "1");
-                                let _ = el.style().set_property("transform", "rotate(45deg)");
-                            }
-                            on:mouseleave=move |e| {
-                                let el = e.target().unwrap().unchecked_into::<web_sys::HtmlElement>();
-                                let _ = el.style().set_property("opacity", "0.7");
-                                let _ = el.style().set_property("transform", "rotate(0deg)");
-                            }
+                            on:click=acao_sair
+                            title="Sair da sala (Mantém ID)"
+                            style="background: #d32f2f; color: white; border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer; font-size: 0.8rem;"
                         >
-                            "⚙️"
+                            "Sair"
+                        </button>
+                        <button
+                            on:click=acao_resetar
+                            title="Apagar sessão e gerar novo ID"
+                            style="background: #455a64; color: white; border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer; font-size: 0.8rem;"
+                        >
+                            "Novo ID"
                         </button>
                     </div>
-                </div>
-
-                // LADO DIREITO: Status e Placar
-                <div style="text-align: right; display: flex; gap: 20px; align-items: center;">
-                    <div>
-                        <strong style="color: #ffeb3b; font-size: 1.1rem; text-shadow: 1px 1px 2px black; display: block;">
-                            {move || status_jogo.get()}
-                        </strong>
-
-                        // INDICADOR DE VEZ DO JOGADOR
-                        {move || {
-                            let vez = turno_atual_id.get();
-                            if vez != meu_id.get() {
-                                view! { <span style="font-size: 11px; color: #ccc;">"Vez do Jogador: " {vez}</span> }.into_any()
-                            } else {
-                                view! {}.into_any()
-                            }
-                        }}
                     </div>
 
-                    <Scoreboard
-                        pontuacao_a=pontuacao_a
-                        pontuacao_b=pontuacao_b
-                    />
-                </div>
-            </div>
-            // --- 2. ÁREA CENTRAL (Mesas e Board) ---
-            <div style="
-                flex: 1;
-                display: flex;
-                flex-direction: row;
-                justify-content: space-between;
-                align-items: flex-start;
-                padding: 20px;
-                gap: 20px;
-                overflow-y: auto;
-            ">
-                // MESA TIME A
-                {move || {
-                    let sou_time_a = meu_id.get() % 2 == 0;
-                    let cb = if sou_time_a { Some(Callback::new(acao_ajuntar)) } else { None };
-                    let titulo = if sou_time_a { "MEU TIME" } else { "TIME INIMIGO" };
-                    view! {
-                        <Table
-                            titulo=titulo.to_string()
-                            jogos=mesa_a
-                            tres_vermelhos=tres_vermelhos_a
-                            on_click=cb
-                            theme=current_theme.get()
-                            card_width=table_width
-                            is_my_team=sou_time_a
-                        />
-                    }
-                }}
 
-                // --- COLUNA CENTRAL (Board + Indicador) ---
-                // Esta div agrupa os elementos verticalmente no centro
+                    // LADO DIREITO: Status e Placar
+                    <div style="text-align: right; display: flex; gap: 20px; align-items: center;">
+                        <div>
+                            <strong style="color: #ffeb3b; font-size: 1.1rem; text-shadow: 1px 1px 2px black; display: block;">
+                                {move || status_jogo.get()}
+                            </strong>
+
+                            // INDICADOR DE VEZ DO JOGADOR
+                            {move || {
+                                let vez = turno_atual_id.get();
+                                if vez != meu_id.get() {
+                                    view! { <span style="font-size: 11px; color: #ccc;">"Vez do Jogador: " {vez}</span> }.into_any()
+                                } else {
+                                    view! {}.into_any()
+                                }
+                            }}
+                        </div>
+
+                        <Scoreboard
+                            pontuacao_a=pontuacao_a
+                            pontuacao_b=pontuacao_b
+                        />
+                    </div>
+                </div>
+                // --- 2. ÁREA CENTRAL (Mesas e Board) ---
                 <div style="
+                    flex: 1;
                     display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    gap: 20px; /* Espaço entre o Lixo e a Bolinha */
-                    flex-shrink: 0;
-                    margin-top: 40px;
+                    flex-direction: row;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    padding: 20px;
+                    gap: 20px;
+                    overflow-y: auto;
                 ">
-                    <Board
-                        lixo=lixo_topo
-                        lixo_selecionado=lixo_selecionado
-                        on_click_deck=Some(Callback::new(move |_| acao_comprar_monte(())))
-                        on_click_trash=Some(Callback::new(toggle_lixo_selecao))
-                        theme=current_theme.get()
-                        card_width=board_width
-                        qtd_monte=qtd_monte
-                        qtd_lixo=qtd_lixo
-                        verso_monte=verso_monte
-                    />
-
-                    // O Indicador agora está DENTRO da coluna central, logo abaixo do Board
-                    <div style="
-                        background: rgba(0,0,0,0.2); 
-                        padding: 10px; 
-                        border-radius: 50%;
-                        border: 1px solid rgba(255,255,255,0.1);
-                    ">
-                        <TurnIndicator
-                            my_id=meu_id
-                            current_turn=turno_atual_id
-                        />
-                    </div>
-                </div>
-
-                // MESA TIME B
-                {move || {
-                    let sou_time_b = meu_id.get() % 2 != 0;
-                    let cb = if sou_time_b { Some(Callback::new(acao_ajuntar)) } else { None };
-                    let titulo = if sou_time_b { "MEU TIME" } else { "TIME INIMIGO" };
-                    view! {
-                        <Table
-                            titulo=titulo.to_string()
-                            jogos=mesa_b
-                            tres_vermelhos=tres_vermelhos_b
-                            on_click=cb
-                            theme=current_theme.get()
-                            card_width=table_width
-                            is_my_team=sou_time_b
-                        />
-                    }
-                }}
-            </div>
-
-            // --- 3. ÁREA INFERIOR (Mão e Ações) ---
-            <div style="
-                flex-shrink: 0;
-                background: linear-gradient(to top, rgba(0,0,0,0.9) 20%, transparent);
-                padding-bottom: 20px;
-                position: relative;
-                z-index: 10;
-            ">
-                // ÁREA DE PREPARAÇÃO (Flutuante sobre a mão)
-                {move || {
-                    let jogos = jogos_preparados.get();
-                    if !jogos.is_empty() {
+                    // MESA TIME A
+                    {move || {
+                        let sou_time_a = meu_id.get() % 2 == 0;
+                        let cb = if sou_time_a { Some(Callback::new(acao_ajuntar)) } else { None };
+                        let titulo = if sou_time_a { "MEU TIME" } else { "TIME INIMIGO" };
                         view! {
-                            <div style="display: flex; justify-content: center; margin-bottom: 10px;">
-                                <div style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px; border: 1px dashed #ffeb3b; text-align: center;">
-                                    <h4 style="margin: 0 0 10px 0; color: #ffeb3b; font-size: 12px;">"Jogos a Baixar"</h4>
-                                    <div style="display: flex; gap: 10px;">
-                                        {jogos.into_iter().enumerate().map(|(idx, cartas)| {
-                                            view! {
-                                                <div on:click=move |_| acao_devolver(idx) style="cursor: pointer; display: flex; transform: scale(0.8);">
-                                                    {cartas.into_iter().map(|c| view! {
-                                                        <CardImage
-                                                            carta=c
-                                                            width="40px"
-                                                            theme=current_theme.get()
-                                                        />
-                                                    }).collect::<Vec<_>>()}
-                                                </div>
-                                            }
-                                        }).collect::<Vec<_>>()}
-                                    </div>
-                                    <button on:click=move |ev| acao_confirmar_baixa(ev) style="margin-top: 5px; background: #2e7d32; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer;">
-                                        "Confirmar"
-                                    </button>
-                                </div>
-                            </div>
-                        }.into_any()
-                    } else {
-                        view! {}.into_any()
-                    }
-                }}
+                            <Table
+                                titulo=titulo.to_string()
+                                jogos=mesa_a
+                                tres_vermelhos=tres_vermelhos_a
+                                on_click=cb
+                                theme=current_theme.get()
+                                card_width=table_width
+                                is_my_team=sou_time_a
+                            />
+                        }
+                    }}
 
-                // CONTAINER FLEX: CONTROLES + MÃO
-                <div style="display: flex; align-items: flex-end; gap: 20px; width: 100%; overflow: hidden; padding: 0 20px;">
-                    // CONTROLES
-                    <div style="flex-shrink: 0; margin-bottom: 20px;">
-                        <GameControls
+                    // --- COLUNA CENTRAL (Board + Indicador) ---
+                    // Esta div agrupa os elementos verticalmente no centro
+                    <div style="
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        gap: 20px; /* Espaço entre o Lixo e a Bolinha */
+                        flex-shrink: 0;
+                        margin-top: 40px;
+                    ">
+                        <Board
+                            lixo=lixo_topo
                             lixo_selecionado=lixo_selecionado
-                            tem_jogos_preparados=Signal::derive(move || !jogos_preparados.get().is_empty())
-                            on_descartar=Callback::new(acao_descartar)
-                            on_separar=Callback::new(acao_separar)
-                            on_ordenar=Callback::new(acao_organizar)
-                            on_confirmar_lixo=Callback::new(confirmar_compra_lixo)
-                            on_confirmar_baixa=Callback::new(acao_confirmar_baixa)
-                            on_cancelar_lixo=Callback::new(move |_| {
-                                set_lixo_selecionado.set(false);
-                                set_ajuntes_lixo_preparados.set(Vec::new());
-                                selected_indices.update(|s| s.clear());
-                            })
+                            on_click_deck=Some(Callback::new(move |_| acao_comprar_monte(())))
+                            on_click_trash=Some(Callback::new(toggle_lixo_selecao))
+                            theme=current_theme.get()
+                            card_width=board_width
+                            qtd_monte=qtd_monte
+                            qtd_lixo=qtd_lixo
+                            verso_monte=verso_monte
+                        />
+
+                        // O Indicador agora está DENTRO da coluna central, logo abaixo do Board
+                        <div style="
+                            background: rgba(0,0,0,0.2); 
+                            padding: 10px; 
+                            border-radius: 50%;
+                            border: 1px solid rgba(255,255,255,0.1);
+                        ">
+                            <TurnIndicator
+                                my_id=meu_id
+                                current_turn=turno_atual_id
+                            />
+                        </div>
+                    </div>
+
+                    // MESA TIME B
+                    {move || {
+                        let sou_time_b = meu_id.get() % 2 != 0;
+                        let cb = if sou_time_b { Some(Callback::new(acao_ajuntar)) } else { None };
+                        let titulo = if sou_time_b { "MEU TIME" } else { "TIME INIMIGO" };
+                        view! {
+                            <Table
+                                titulo=titulo.to_string()
+                                jogos=mesa_b
+                                tres_vermelhos=tres_vermelhos_b
+                                on_click=cb
+                                theme=current_theme.get()
+                                card_width=table_width
+                                is_my_team=sou_time_b
+                            />
+                        }
+                    }}
+                </div>
+
+                // --- 3. ÁREA INFERIOR (Mão e Ações) ---
+                <div style="
+                    flex-shrink: 0;
+                    background: linear-gradient(to top, rgba(0,0,0,0.9) 20%, transparent);
+                    padding-bottom: 20px;
+                    position: relative;
+                    z-index: 10;
+                ">
+                    // ÁREA DE PREPARAÇÃO (Flutuante sobre a mão)
+                    {move || {
+                        let jogos = jogos_preparados.get();
+                        if !jogos.is_empty() {
+                            view! {
+                                <div style="display: flex; justify-content: center; margin-bottom: 10px;">
+                                    <div style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px; border: 1px dashed #ffeb3b; text-align: center;">
+                                        <h4 style="margin: 0 0 10px 0; color: #ffeb3b; font-size: 12px;">"Jogos a Baixar"</h4>
+                                        <div style="display: flex; gap: 10px;">
+                                            {jogos.into_iter().enumerate().map(|(idx, cartas)| {
+                                                view! {
+                                                    <div on:click=move |_| acao_devolver(idx) style="cursor: pointer; display: flex; transform: scale(0.8);">
+                                                        {cartas.into_iter().map(|c| view! {
+                                                            <CardImage
+                                                                carta=c
+                                                                width="40px"
+                                                                theme=current_theme.get()
+                                                            />
+                                                        }).collect::<Vec<_>>()}
+                                                    </div>
+                                                }
+                                            }).collect::<Vec<_>>()}
+                                        </div>
+                                        <button on:click=move |ev| acao_confirmar_baixa(ev) style="margin-top: 5px; background: #2e7d32; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer;">
+                                            "Confirmar"
+                                        </button>
+                                    </div>
+                                </div>
+                            }.into_any()
+                        } else {
+                            view! {}.into_any()
+                        }
+                    }}
+
+                    // CONTAINER FLEX: CONTROLES + MÃO
+                    <div style="display: flex; align-items: flex-end; gap: 20px; width: 100%; overflow: hidden; padding: 0 20px;">
+                        // CONTROLES
+                        <div style="flex-shrink: 0; margin-bottom: 20px;">
+                            <GameControls
+                                lixo_selecionado=lixo_selecionado
+                                tem_jogos_preparados=Signal::derive(move || !jogos_preparados.get().is_empty())
+                                on_descartar=Callback::new(acao_descartar)
+                                on_separar=Callback::new(acao_separar)
+                                on_ordenar=Callback::new(acao_organizar)
+                                on_confirmar_lixo=Callback::new(confirmar_compra_lixo)
+                                on_confirmar_baixa=Callback::new(acao_confirmar_baixa)
+                                on_cancelar_lixo=Callback::new(move |_| {
+                                    set_lixo_selecionado.set(false);
+                                    set_ajuntes_lixo_preparados.set(Vec::new());
+                                    selected_indices.update(|s| s.clear());
+                                })
+                            />
+                        </div>
+
+                        // MÃO
+                        <div style="flex-grow: 1; min-width: 0;">
+                            {move || {
+                                let _mao = minha_mao.get();
+                                view! {
+                                    <Hand
+                                        cartas=minha_mao
+                                        card_width=hand_card_width
+                                        theme=current_theme.get()
+                                        selected_indices=selected_indices
+                                    />
+                                }
+                            }}
+                        </div>
+
+                        // SETTINGS
+                        <SettingsModal
+                            show=show_settings
+                            on_close=Callback::new(move |_| set_show_settings.set(false))
+                            current_theme_path=current_theme
+                            card_scale=card_scale
                         />
                     </div>
-
-                    // MÃO
-                    <div style="flex-grow: 1; min-width: 0;">
-                        {move || {
-                            let _mao = minha_mao.get();
-                            view! {
-                                <Hand
-                                    cartas=minha_mao
-                                    card_width=hand_card_width
-                                    theme=current_theme.get()
-                                    selected_indices=selected_indices
-                                />
-                            }
-                        }}
-                    </div>
-
-                    // SETTINGS
-                    <SettingsModal
-                        show=show_settings
-                        on_close=Callback::new(move |_| set_show_settings.set(false))
-                        current_theme_path=current_theme
-                        card_scale=card_scale
-                    />
                 </div>
-            </div>
 
-            <NotificationToast toasts=toasts />
-        </div>
+                <NotificationToast toasts=toasts />
+            </div>
+        </Show>
     }
 }

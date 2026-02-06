@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+rand = "0.9.2"
 # Framework Web
 leptos = { version = "0.7", features = ["csr"] }
 leptos_router = { version = "0.7" }
@@ -33,6 +34,7 @@ web-sys = { version = "0.3", features = [
   "console",
   "Window",
   "Document",
+  "Storage",
 ] }
 console_error_panic_hook = "0.1" # Para ver erros do Rust no console do browser
 console_log = "1.0"
