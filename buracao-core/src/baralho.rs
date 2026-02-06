@@ -94,7 +94,6 @@ impl Valor {
     // Retorna um número para cálculo de distância (ex: As=1, Dois=2 ... Rei=13)
     pub fn indice_sequencia(&self) -> u8 {
         match self {
-            Valor::As => 1,
             Valor::Dois => 2,
             Valor::Tres => 3,
             Valor::Quatro => 4,
@@ -107,6 +106,7 @@ impl Valor {
             Valor::Valete => 11,
             Valor::Dama => 12,
             Valor::Rei => 13,
+            Valor::As => 14,
             Valor::Joker => 0, // Joker não tem índice fixo
         }
     }
@@ -232,4 +232,3 @@ impl Baralho {
         self.cartas.len()
     }
 }
-// --- PROTOCOLO DE COMUNICAÇÃO (JSON) ---

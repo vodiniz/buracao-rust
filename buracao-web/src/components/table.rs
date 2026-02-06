@@ -12,9 +12,8 @@ pub fn Table(
     #[prop(into)] jogos: Signal<Vec<DetalheJogo>>,
     #[prop(into, default = Signal::derive(|| vec![]))] tres_vermelhos: Signal<Vec<Carta>>,
     #[prop(default = None)] on_click: Option<Callback<usize>>,
-
-    // CORREÇÃO 1: Default consistente com o Hand (apenas o nome da pasta)
     #[prop(optional, into, default = "PaperCards".to_string())] theme: String,
+    #[prop(optional, into, default = false)] is_my_team: bool,
 
     #[prop(into, default = "80px".to_string().into())] card_width: Signal<String>,
 ) -> impl IntoView {
@@ -23,10 +22,24 @@ pub fn Table(
     let theme_body = theme.clone();
     let theme_footer = theme.clone();
 
+    // Lógica da Borda da Mesa
+    let border_style = if is_my_team {
+        "2px solid #ffeb3b" // Verde mais grosso se for meu time
+    } else {
+        "1px solid rgba(255,255,255,0.1)" // Borda sutil se for inimigo
+    };
+
+    let box_shadow = if is_my_team {
+        "0 0 15px rgba(255, 235, 59, 0.4)" // Glow
+    } else {
+        "none"
+    };
+
     view! {
-        <div style="
+        <div style=format!("
             flex: 1; 
-            border: 1px solid rgba(255,255,255,0.1); 
+            border: {}; 
+            box-shadow: {};
             border-radius: 12px; 
             min-width: 300px; 
             background: rgba(0,0,0,0.15);
@@ -35,7 +48,8 @@ pub fn Table(
             height: 100%; 
             max-height: 50vh; 
             overflow: hidden;
-        ">
+            transition: all 0.3s ease;
+        ", border_style, box_shadow)>
             // --- HEADER ---
             <h3 style="
                 margin: 0; padding: 10px; color: #ffeb3b; font-size: 14px; 
@@ -99,12 +113,22 @@ pub fn Table(
                                 view! {
                                     <div
                                         on:click=move |_| { if let Some(cb) = cb_local { cb.run(idx); } }
+                                        // 3. CORREÇÃO DO ESPAÇO EXTRA:
+                                        // - Adicionado 'width: fit-content' para a caixa abraçar as cartas
+                                        // - Padding lateral reduzido para ficar justo
                                         style=move || {
                                             let cursor = if interativo { "pointer" } else { "default" };
                                             format!("
-                                                background: rgba(0,0,0,0.2); padding: 8px; border-radius: 10px;
-                                                display: flex; align-items: center; cursor: {}; transition: all 0.2s;
-                                                border: 1px solid rgba(255,255,255,0.05); min-height: 90px;
+                                                background: rgba(0,0,0,0.2); 
+                                                padding: 8px 8px 8px 8px; 
+                                                border-radius: 10px;
+                                                display: inline-flex; 
+                                                align-items: center; 
+                                                cursor: {}; 
+                                                transition: all 0.2s;
+                                                border: 1px solid rgba(255,255,255,0.05); 
+                                                min-height: 90px;
+                                                /* width: fit-content; REMOVIDO pois inline-flex resolve */
                                             ", cursor)
                                         }
                                     >
@@ -142,7 +166,6 @@ pub fn Table(
                                             }
                                         }).collect::<Vec<_>>()}
 
-                                        <div style="width: 45px;"></div>
                                     </div>
                                 }
                             }).collect::<Vec<_>>().into_any()

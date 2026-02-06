@@ -1,14 +1,17 @@
 [build]
-# Onde o site compilado vai ficar (padrão é 'dist')
+target = "index.html"
 dist = "dist"
-# O caminho base da URL. Se for rodar em localhost, é "/".
 public_url = "/"
 
 [serve]
-# Porta do servidor (padrão 8080). Mude se tiver conflito.
-port = 8080
-# Abrir o navegador automaticamente?
-open = false
+# MUDANÇA 1: Frontend roda na 3000 para não brigar com o Backend na 8080
+port = 3000
+open = true
 
 [[assets]]
 source = "public"
+
+[[proxy]]
+rewrite = "/buraco"
+backend = "ws://127.0.0.1:8080/buraco"
+ws = true

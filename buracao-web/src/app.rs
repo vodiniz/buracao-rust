@@ -12,6 +12,7 @@ use std::time::Duration;
 use crate::components::board::Board;
 use crate::components::controls::GameControls;
 use crate::components::hand::Hand;
+use crate::components::notification::{NotificationToast, Toast, ToastType};
 use crate::components::scoreboard::Scoreboard;
 use crate::components::settings::SettingsModal;
 use crate::components::table::Table;
@@ -55,6 +56,7 @@ pub fn App() -> impl IntoView {
 
     let (meu_id, set_meu_id) = signal(0_u32);
     let (status_jogo, set_status_jogo) = signal("Conectando...".to_string());
+    let (sou_o_jogador_da_vez, set_sou_o_jogador_da_vez) = signal(false);
 
     let (lixo_selecionado, set_lixo_selecionado) = signal(false);
 
@@ -79,6 +81,30 @@ pub fn App() -> impl IntoView {
 
     let (verso_monte, set_verso_monte) = signal("back_r".to_string());
 
+    let (toasts, set_toasts) = signal(Vec::<Toast>::new());
+    let next_toast_id = StoredValue::new(0_usize);
+
+    // Agora recebe também o 'tipo'
+    let add_toast = move |msg: String, tipo: ToastType| {
+        let id = next_toast_id.get_value();
+        next_toast_id.set_value(id + 1);
+
+        set_toasts.update(|t| {
+            t.push(Toast {
+                id,
+                message: msg,
+                toast_type: tipo, // Passa o tipo aqui
+            })
+        });
+
+        set_timeout(
+            move || {
+                set_toasts.update(|t| t.retain(|toast| toast.id != id));
+            },
+            std::time::Duration::from_secs(4),
+        );
+    };
+
     Effect::new(move |_| {
         let (tx, mut rx) = mpsc::unbounded();
         set_ws_sender.set(Some(tx));
@@ -91,9 +117,21 @@ pub fn App() -> impl IntoView {
                 } else {
                     "ws"
                 };
-                let host = location.host().unwrap(); // Isso pega "localhost:3030" automaticamente
-                format!("{}://{}/buraco", protocol, host)
+                let host = location.host().unwrap();
+
+                // --- CORREÇÃO AQUI ---
+                // Se estiver rodando no Trunk (Porta 3000), forçamos a conexão direta no Backend (8080).
+                // Isso evita problemas com o Proxy do Trunk e falhas de IPv4/IPv6.
+                if host.contains("3000") {
+                    "ws://127.0.0.1:8080/buraco".to_string()
+                } else {
+                    // Se estiver em Produção (Docker/Nuvem), usa a porta atual (8080)
+                    format!("{}://{}/buraco", protocol, host)
+                }
             };
+
+            // Log para você ver no Console do navegador qual URL ele escolheu
+            leptos::logging::log!("Tentando conectar no WebSocket em: {}", ws_url);
             let ws = match WebSocket::open(&ws_url) {
                 Ok(ws) => ws,
                 Err(e) => {
@@ -130,6 +168,7 @@ pub fn App() -> impl IntoView {
                             set_tres_vermelhos_a.set(visao.tres_vermelho_time_a);
                             set_tres_vermelhos_b.set(visao.tres_vermelho_time_b);
 
+                            set_sou_o_jogador_da_vez.set(visao.posso_jogar);
                             let turno = if visao.posso_jogar {
                                 "SUA VEZ!"
                             } else {
@@ -154,7 +193,10 @@ pub fn App() -> impl IntoView {
                         }
                         Ok(MsgServidor::Erro(e)) => {
                             // 1. Mostra o erro apenas no texto do canto direito
-                            set_status_jogo.set(format!("ERRO: {}", e));
+                            // set_status_jogo.set(format!("ERRO: {}", e));
+                            add_toast(format!("ERRO: {}", e), ToastType::Error);
+
+                            selected_indices.update(|s| s.clear());
 
                             // 2. Lógica de devolver cartas (MANTIDA)
                             let jogos_pendentes = jogos_preparados.get();
@@ -191,7 +233,8 @@ pub fn App() -> impl IntoView {
                             );
                         }
                         Ok(MsgServidor::Notificacao(n)) => {
-                            leptos::logging::log!("Notificação: {}", n)
+                            leptos::logging::log!("Notificação: {}", n);
+                            add_toast(n, ToastType::Info);
                         }
                         Ok(MsgServidor::FimDeJogo { vencedor_time, .. }) => {
                             set_status_jogo.set(format!("Vencedor: Time {}", vencedor_time));
@@ -357,12 +400,14 @@ pub fn App() -> impl IntoView {
     };
 
     let acao_ajuntar = move |idx_jogo_mesa: usize| {
+        // 1. Verifica se tem cartas selecionadas na mão
         let indices = selected_indices.get();
         if indices.is_empty() {
             let _ = window().alert_with_message("Selecione cartas da mão primeiro para ajuntar!");
             return;
         }
 
+        // 2. Pega as cartas reais baseadas nos índices
         let cartas_selecionadas: Vec<Carta> = minha_mao.with(|mao| {
             indices
                 .iter()
@@ -370,8 +415,8 @@ pub fn App() -> impl IntoView {
                 .collect()
         });
 
+        // 3. Descobre o ID real do jogo no servidor (Time A ou B)
         let sou_time_a = meu_id.get() % 2 == 0;
-
         let id_jogo_real = if sou_time_a {
             mesa_a.with(|m| m.get(idx_jogo_mesa).map(|jogo| jogo.id))
         } else {
@@ -379,14 +424,32 @@ pub fn App() -> impl IntoView {
         };
 
         if let Some(id_real) = id_jogo_real {
+            // --- LÓGICA MÁGICA AQUI ---
             if lixo_selecionado.get() {
-                set_ajuntes_lixo_preparados.update(|lista| {
-                    lista.push((id_real, cartas_selecionadas));
+                // CENÁRIO: Quero pegar o lixo ajuntando neste jogo existente.
+
+                // Monta a tupla (ID_DO_JOGO, CARTAS_DA_MÃO)
+                let ajunte_do_lixo = vec![(id_real, cartas_selecionadas)];
+
+                // Se o usuário TIVER jogos novos preparados na área flutuante, mandamos junto
+                // (Caso ele queira baixar um jogo novo E ajuntar no velho ao mesmo tempo pra pegar o lixo)
+                let jogos_novos_guardados = jogos_preparados.get();
+
+                leptos::logging::log!("Enviando ComprarLixo via Ajunte no jogo ID: {}", id_real);
+
+                // Envia direto! Não espera botão de confirmar.
+                enviar_acao(AcaoJogador::ComprarLixo {
+                    novos_jogos: jogos_novos_guardados,
+                    cartas_em_jogos_existentes: ajunte_do_lixo,
                 });
 
-                leptos::logging::log!("Ajunte preparado (Lixo) no jogo ID: {}", id_real);
+                // Limpa a bagunça da interface
+                set_lixo_selecionado.set(false);
+                set_ajuntes_lixo_preparados.set(Vec::new()); // Limpa buffer antigo se tiver
+                set_jogos_preparados.set(Vec::new()); // Limpa jogos novos pois já foram enviados
                 selected_indices.update(|s| s.clear());
             } else {
+                // CENÁRIO PADRÃO: Apenas ajuntar cartas da mão (sem envolver lixo)
                 enviar_acao(AcaoJogador::Ajuntar {
                     indice_jogo: id_real,
                     cartas: cartas_selecionadas,
@@ -399,10 +462,7 @@ pub fn App() -> impl IntoView {
         }
     };
 
-    let e_minha_vez = move || {
-        let texto = status_jogo.get();
-        texto.contains("SUA VEZ")
-    };
+    let e_minha_vez = move || sou_o_jogador_da_vez.get();
 
     let acao_organizar = move |_: web_sys::MouseEvent| {
         set_minha_mao.update(|mao| {
@@ -519,6 +579,7 @@ pub fn App() -> impl IntoView {
                             on_click=cb
                             theme=current_theme.get()
                             card_width=table_width
+                            is_my_team=sou_time_a
                         />
                     }
                 }}
@@ -551,6 +612,7 @@ pub fn App() -> impl IntoView {
                             on_click=cb
                             theme=current_theme.get()
                             card_width=table_width
+                            is_my_team=sou_time_b
                         />
                     }
                 }}
@@ -643,7 +705,7 @@ pub fn App() -> impl IntoView {
                 </div>
             </div>
 
-            // --- OVERLAY DE ERRO ---
+            <NotificationToast toasts=toasts />
         </div>
     }
 }

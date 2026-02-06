@@ -123,40 +123,44 @@ pub fn organizar_para_exibicao(cartas: &[Carta]) -> Vec<Carta> {
         if c.valor == Valor::Joker {
             curingas.push(c.clone());
         } else if c.valor == Valor::Dois && Some(c.naipe) != naipe_dominante {
-            // Se for um 2 de naipe diferente do jogo, é certeza que é coringa
             curingas.push(c.clone());
         } else {
-            // Aqui entram as cartas normais E o 2 se for do mesmo naipe (natural)
             naturais.push(c.clone());
         }
     }
 
+    // HELPER: Ás vale 14 visualmente
+    let valor_visual = |c: &Carta| -> u8 {
+        match c.valor {
+            Valor::As => 14,
+            _ => c.valor.indice_sequencia(),
+        }
+    };
+
     if naturais.is_empty() {
         let mut t = curingas;
-        t.sort_by_key(|c| c.valor.indice_sequencia());
+        t.sort_by_key(|c| valor_visual(c));
         return t;
     }
 
-    naturais.sort_by_key(|c| c.valor.indice_sequencia());
+    naturais.sort_by_key(|c| valor_visual(c));
 
-    // Verifica se é Trinca (lavadeira): Primeiro e último valor iguais
+    // Trinca (lavadeira)
     if naturais.first().unwrap().valor == naturais.last().unwrap().valor {
         let mut r = naturais;
         r.append(&mut curingas);
         return r;
     }
 
-    // Lógica visual de Sequência (inserindo curingas nos buracos)
+    // Sequência (Lógica de preencher buracos)
     let mut resultado = Vec::new();
     let mut anterior = naturais[0].clone();
     resultado.push(anterior.clone());
 
     for carta_atual in naturais.into_iter().skip(1) {
-        let idx_ant = anterior.valor.indice_sequencia();
-        let idx_atual = carta_atual.valor.indice_sequencia();
+        let idx_ant = valor_visual(&anterior);
+        let idx_atual = valor_visual(&carta_atual);
 
-        // Proteção para o caso do Ás ser alto ou baixo dependendo da regra,
-        // aqui assumimos apenas a diferença positiva simples.
         let gap = if idx_atual > idx_ant {
             idx_atual - idx_ant
         } else {
@@ -164,7 +168,6 @@ pub fn organizar_para_exibicao(cartas: &[Carta]) -> Vec<Carta> {
         };
 
         if gap > 1 {
-            // Se tem um buraco (ex: 7 e 9, gap é 2), precisamos preencher (gap - 1) coringas
             for _ in 0..(gap - 1) {
                 if let Some(curinga) = curingas.pop() {
                     resultado.push(curinga);
@@ -175,8 +178,31 @@ pub fn organizar_para_exibicao(cartas: &[Carta]) -> Vec<Carta> {
         anterior = carta_atual;
     }
 
-    // Se sobraram coringas (ex: colocou no final da sequência), adiciona agora
-    resultado.append(&mut curingas);
+    // --- NOVA LÓGICA DE POSICIONAMENTO DO CORINGA ---
+
+    if !curingas.is_empty() {
+        // Verifica a última carta colocada na sequência visual
+        if let Some(ultima_carta) = resultado.last() {
+            let valor_ultimo = valor_visual(ultima_carta);
+
+            // REGRA: Se a sequência termina em Ás (14), não dá pra subir mais.
+            // Então o coringa deve ir para o INÍCIO (antes do 10, ou antes do 4 se estiver completa).
+            // Se termina em qualquer outra carta (ex: Rei, 10, 6), o coringa vai pro FINAL pra continuar crescendo.
+            if valor_ultimo == 14 {
+                // Insere todos os coringas restantes no começo
+                for c in curingas {
+                    resultado.insert(0, c);
+                }
+            } else {
+                // Comportamento padrão: adiciona ao final
+                resultado.append(&mut curingas);
+            }
+        } else {
+            // Fallback (não deve acontecer pois resultado começa com 1 carta)
+            resultado.append(&mut curingas);
+        }
+    }
+
     resultado
 }
 
