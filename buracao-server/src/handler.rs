@@ -1,7 +1,7 @@
 use crate::state::{GlobalState, Room};
 use buracao_core::acoes::{AcaoJogador, MsgServidor};
 use futures::{SinkExt, StreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize}; // Adicionado Serialize
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use warp::ws::{Message, WebSocket};
@@ -12,6 +12,14 @@ struct MensagemLogin {
     device_id: String,
     nome: String,
     sala: String,
+}
+
+// --- NOVO: Struct para enviar a lista de nomes ao Frontend ---
+// Isso permite que o frontend saiba que o ID 0 é "Vitor", o ID 1 é "João", etc.
+#[derive(Serialize)]
+struct EventoNomes {
+    tipo: String, // Será sempre "NomesJogadores"
+    mapa: std::collections::HashMap<u32, String>,
 }
 
 pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
@@ -100,14 +108,32 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
                 .insert(login_data.device_id.clone(), my_player_id);
         }
 
+        // --- NOVO: SALVAR O NOME DO JOGADOR ---
+        // Sempre atualiza o nome (caso ele tenha mudado no login)
+        room.player_names
+            .insert(my_player_id, login_data.nome.clone());
+
         // SEMPRE atualiza o canal de comunicação (para novos e reconexões)
-        // O socket antigo morreu, este 'tx' é o novo.
         room.clients.insert(my_player_id, tx.clone());
 
         // Envia estado inicial imediato
         let visao = room.game_state.gerar_visao_para_jogador(my_player_id);
         if let Ok(msg) = serde_json::to_string(&MsgServidor::Estado(visao)) {
             let _ = tx.send(Message::text(msg));
+        }
+
+        // --- NOVO: ENVIAR LISTA DE NOMES PARA TODOS ---
+        // Como entrou gente (ou reconectou), avisamos a sala inteira quem é quem.
+        let evento_nomes = EventoNomes {
+            tipo: "NomesJogadores".to_string(),
+            mapa: room.player_names.clone(),
+        };
+
+        if let Ok(json_nomes) = serde_json::to_string(&evento_nomes) {
+            // Manda para todos os clientes conectados na sala
+            for client_tx in room.clients.values() {
+                let _ = client_tx.send(Message::text(json_nomes.clone()));
+            }
         }
     }
 

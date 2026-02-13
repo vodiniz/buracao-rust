@@ -1,13 +1,14 @@
 use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
 use gloo_net::websocket::{futures::WebSocket, Message};
+use leptos::html::Audio;
 use leptos::prelude::window;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use leptos::wasm_bindgen::JsCast;
 use serde_json;
 use std::collections::HashSet;
 use std::time::Duration;
+use wasm_bindgen_futures::JsFuture;
 
 use crate::components::board::Board;
 use crate::components::controls::GameControls;
@@ -17,13 +18,19 @@ use crate::components::notification::{NotificationToast, Toast, ToastType};
 use crate::components::scoreboard::Scoreboard;
 use crate::components::settings::SettingsModal;
 use crate::components::table::Table;
-use crate::components::turn_indicator::TurnIndicator; // <--- IMPORTAR
+use crate::components::turn_indicator::TurnIndicator;
 
 use crate::utils::assets::get_card_path;
 use crate::utils::mappers::{carta_para_asset, verso_para_asset};
 
 use buracao_core::acoes::{AcaoJogador, DetalheJogo, MsgServidor};
 use buracao_core::baralho::Carta;
+
+#[derive(serde::Deserialize, Debug, Clone)]
+struct EventoNomes {
+    // tipo: String, // Não precisamos mapear o tipo aqui pois já filtramos antes
+    mapa: std::collections::HashMap<u32, String>,
+}
 
 #[component]
 fn CardImage(
@@ -38,8 +45,6 @@ fn CardImage(
 
 fn get_or_create_device_id() -> String {
     let window = web_sys::window().expect("no global `window` exists");
-
-    // MUDANÇA: Voltamos para local_storage para garantir a persistência real
     let storage = window
         .local_storage()
         .ok()
@@ -55,39 +60,32 @@ fn get_or_create_device_id() -> String {
     }
 }
 
+const SOUND_PATH: &str = "/assets/audio/my_turn_xylophone.wav";
+
 #[component]
 pub fn App() -> impl IntoView {
     let (turno_atual_id, set_turno_atual_id) = signal(0_u32);
     let (minha_mao, set_minha_mao) = signal(Vec::<Carta>::new());
     let (lixo_topo, set_lixo_topo) = signal(Option::<Carta>::None);
-
     let (jogos_preparados, set_jogos_preparados) = signal(Vec::<Vec<Carta>>::new());
-
     let (ajuntes_lixo_preparados, set_ajuntes_lixo_preparados) =
         signal(Vec::<(u32, Vec<Carta>)>::new());
-
     let (mesa_a, set_mesa_a) = signal(Vec::<DetalheJogo>::new());
     let (mesa_b, set_mesa_b) = signal(Vec::<DetalheJogo>::new());
-
     let (pontuacao_a, set_pontuacao_a) = signal(0);
     let (pontuacao_b, set_pontuacao_b) = signal(0);
-
     let (tres_vermelhos_a, set_tres_vermelhos_a) = signal(Vec::<Carta>::new());
     let (tres_vermelhos_b, set_tres_vermelhos_b) = signal(Vec::<Carta>::new());
-
     let (meu_id, set_meu_id) = signal(0_u32);
     let (status_jogo, set_status_jogo) = signal("Conectando...".to_string());
     let (sou_o_jogador_da_vez, set_sou_o_jogador_da_vez) = signal(false);
-
     let (lixo_selecionado, set_lixo_selecionado) = signal(false);
-
     let selected_indices = RwSignal::new(HashSet::new());
     let (ws_sender, set_ws_sender) = signal(Option::<mpsc::UnboundedSender<String>>::None);
 
     // --- ESTADOS DE CONFIGURAÇÃO ---
     let (show_settings, set_show_settings) = signal(false);
     let current_theme = RwSignal::new("/assets/cards/PaperCards".to_string());
-    // Nota: A linha abaixo estava duplicada no original, removi a redundância se necessário ou mantive a estrutura lógica.
     let card_scale = RwSignal::new(1.0);
     let hand_card_width =
         Signal::derive(move || format!("{}px", (100.0 * card_scale.get()) as i32));
@@ -96,7 +94,6 @@ pub fn App() -> impl IntoView {
     let (qtd_lixo, set_qtd_lixo) = signal(0_u32);
 
     // --- SINAIS DERIVADOS DE TAMANHO ---
-    let hand_width = Signal::derive(move || format!("{}px", (100.0 * card_scale.get()) as i32));
     let board_width = Signal::derive(move || format!("{}px", (90.0 * card_scale.get()) as i32));
     let table_width = Signal::derive(move || format!("{}px", (80.0 * card_scale.get()) as i32));
 
@@ -109,22 +106,25 @@ pub fn App() -> impl IntoView {
     let (in_game, set_in_game) = signal(false); // false = Tela de Login, true = Jogo
     let (player_name, set_player_name) = signal("".to_string());
     let (room_code, set_room_code) = signal("".to_string());
-    // ID persistente (não muda com refresh)
     let device_id = StoredValue::new(get_or_create_device_id());
 
-    // Agora recebe também o 'tipo'
+    // NOVO: Mapa de Nomes para traduzir IDs
+    let (mapa_nomes, set_mapa_nomes) = signal(std::collections::HashMap::<u32, String>::new());
+
+    let (qtd_cartas_jogadores, set_qtd_cartas_jogadores) = signal(Vec::<usize>::new());
+
+    let audio_ref = NodeRef::<Audio>::new();
+
     let add_toast = move |msg: String, tipo: ToastType| {
         let id = next_toast_id.get_value();
         next_toast_id.set_value(id + 1);
-
         set_toasts.update(|t| {
             t.push(Toast {
                 id,
                 message: msg,
-                toast_type: tipo, // Passa o tipo aqui
+                toast_type: tipo,
             })
         });
-
         set_timeout(
             move || {
                 set_toasts.update(|t| t.retain(|toast| toast.id != id));
@@ -133,16 +133,12 @@ pub fn App() -> impl IntoView {
         );
     };
 
-    // --- AÇÃO DE ENTRAR (Vem do LoginScreen) ---
     let ao_entrar = Callback::new(move |(nome, sala): (String, String)| {
-        // 1. Limpa dados visuais da partida anterior (Estado Fantasma)
         set_minha_mao.set(Vec::new());
         set_mesa_a.set(Vec::new());
         set_mesa_b.set(Vec::new());
         set_jogos_preparados.set(Vec::new());
         set_status_jogo.set("Conectando à sala...".to_string());
-
-        // 2. Define dados da nova conexão
         set_player_name.set(nome);
         set_room_code.set(sala);
         set_in_game.set(true);
@@ -150,19 +146,62 @@ pub fn App() -> impl IntoView {
 
     let acao_sair = move |_| {
         set_in_game.set(false);
-        // Força um reload para garantir que o WebSocket morra e a memória limpe
         let _ = window().location().reload();
     };
 
-    // 2. Apaga sua identidade e reseta tudo (Vira um novo usuário)
     let acao_resetar = move |_| {
         let window = window();
         if let Ok(Some(storage)) = window.local_storage() {
-            // Apaga o ID do navegador
             let _ = storage.remove_item("buraco_device_id");
         }
-        // Recarrega a página (vai gerar um ID novo no próximo load)
         let _ = window.location().reload();
+    };
+
+    // 1. CONFIGURAÇÃO DE VOLUME
+    let volume = RwSignal::new(0.8);
+
+    Effect::new(move |_| {
+        if let Some(win) = web_sys::window() {
+            if let Ok(Some(storage)) = win.local_storage() {
+                if let Ok(Some(vol_str)) = storage.get_item("buraco_volume") {
+                    if let Ok(val) = vol_str.parse::<f64>() {
+                        volume.set(val);
+                    }
+                }
+            }
+        }
+    });
+
+    // FUNÇÃO DE TOCAR SOM COM LOGS (Robusta com NodeRef)
+    let tocar_som_sua_vez = move || {
+        let vol = volume.get_untracked();
+
+        if vol <= 0.0 {
+            return;
+        }
+
+        // Tenta pegar o elemento <audio> que está no HTML
+        if let Some(audio_element) = audio_ref.get() {
+            // Configurações básicas
+            audio_element.set_volume(vol);
+            audio_element.set_current_time(0.0); // Reinicia o som se já estiver tocando
+
+            // O .play() retorna Result<Promise, JsValue>
+            match audio_element.play() {
+                Ok(promise) => {
+                    spawn_local(async move {
+                        // JsFuture transforma a Promise do JS em algo que o Rust entende
+                        if let Err(e) = JsFuture::from(promise).await {
+                            // Erro comum: O usuário ainda não interagiu com a página
+                            leptos::logging::warn!("⚠️ [SOM] Bloqueado pelo navegador: {:?}", e);
+                        }
+                    });
+                }
+                Err(e) => {
+                    leptos::logging::error!("❌ [SOM] Erro ao chamar .play(): {:?}", e);
+                }
+            }
+        }
     };
 
     Effect::new(move |_| {
@@ -182,19 +221,13 @@ pub fn App() -> impl IntoView {
                     "ws"
                 };
                 let host = location.host().unwrap();
-
-                // --- CORREÇÃO AQUI ---
-                // Se estiver rodando no Trunk (Porta 3000), forçamos a conexão direta no Backend (8080).
-                // Isso evita problemas com o Proxy do Trunk e falhas de IPv4/IPv6.
                 if host.contains("3000") {
                     "ws://127.0.0.1:8080/buraco".to_string()
                 } else {
-                    // Se estiver em Produção (Docker/Nuvem), usa a porta atual (8080)
                     format!("{}://{}/buraco", protocol, host)
                 }
             };
 
-            // Log para você ver no Console do navegador qual URL ele escolheu
             leptos::logging::log!("Tentando conectar no WebSocket em: {}", ws_url);
             let ws = match WebSocket::open(&ws_url) {
                 Ok(ws) => ws,
@@ -233,95 +266,114 @@ pub fn App() -> impl IntoView {
 
             while let Some(msg) = read.next().await {
                 if let Ok(Message::Text(text)) = msg {
-                    match serde_json::from_str::<MsgServidor>(&text) {
-                        Ok(MsgServidor::Estado(visao)) => {
-                            set_minha_mao.set(visao.minha_mao);
-                            set_lixo_topo.set(visao.lixo);
-                            set_meu_id.set(visao.meu_id);
-                            set_mesa_a.set(visao.mesa_time_a);
-                            set_mesa_b.set(visao.mesa_time_b);
-
-                            set_pontuacao_a.set(visao.pontuacao_a);
-                            set_pontuacao_b.set(visao.pontuacao_b);
-
-                            set_tres_vermelhos_a.set(visao.tres_vermelho_time_a);
-                            set_tres_vermelhos_b.set(visao.tres_vermelho_time_b);
-
-                            set_sou_o_jogador_da_vez.set(visao.posso_jogar);
-                            let turno = if visao.posso_jogar {
-                                "SUA VEZ!"
-                            } else {
-                                "Aguarde..."
-                            };
-                            set_status_jogo.set(format!("Rodada {}. {}", visao.rodada, turno));
-
-                            set_jogos_preparados.set(Vec::new());
-
-                            set_qtd_monte.set(visao.qtd_monte);
-                            set_qtd_lixo.set(visao.qtd_lixo);
-
-                            let nome_arquivo = verso_para_asset(visao.verso_topo);
-                            set_verso_monte.set(nome_arquivo.to_string());
-                            set_verso_monte.set(nome_arquivo.to_string());
-
-                            leptos::logging::log!(
-                                "Backend mandou: {:?} -> Arquivo: {}",
-                                visao.verso_topo,
-                                nome_arquivo
-                            );
-                        }
-                        Ok(MsgServidor::Erro(e)) => {
-                            // 1. Mostra o erro apenas no texto do canto direito
-                            // set_status_jogo.set(format!("ERRO: {}", e));
-                            add_toast(format!("ERRO: {}", e), ToastType::Error);
-
-                            selected_indices.update(|s| s.clear());
-
-                            // 2. Lógica de devolver cartas (MANTIDA)
-                            let jogos_pendentes = jogos_preparados.get();
-                            if !jogos_pendentes.is_empty() {
-                                set_minha_mao.update(|mao| {
-                                    for jogo in jogos_pendentes {
-                                        mao.extend(jogo);
-                                    }
-                                    mao.sort();
-                                });
-                                set_jogos_preparados.set(Vec::new());
-                                leptos::logging::log!("Erro: Cartas devolvidas.");
+                    // TENTATIVA 1: É uma mensagem padrão do jogo?
+                    if let Ok(msg_servidor) = serde_json::from_str::<MsgServidor>(&text) {
+                        match msg_servidor {
+                            MsgServidor::BoasVindas { .. } => {
+                                // Apenas ignora ou loga, já que estamos usando a mensagem de Estado para sincronizar
+                                leptos::logging::log!("👋 Boas vindas recebidas");
                             }
+                            MsgServidor::Estado(visao) => {
+                                // 1. Atualiza dados básicos
+                                set_minha_mao.set(visao.minha_mao);
+                                set_lixo_topo.set(visao.lixo);
+                                set_meu_id.set(visao.meu_id);
 
-                            // 3. RECUPERAÇÃO AUTOMÁTICA APÓS 3 SEGUNDOS
-                            // Isso fará a mensagem de erro sumir e voltar a dizer de quem é a vez
-                            let meu_id_local = meu_id.get();
-                            let turno_atual_local = turno_atual_id.get();
-                            // let rodada_local = visao.rodada; // Ops, visao não está disponível aqui no erro.
-                            // Vamos apenas limpar a mensagem ou colocar algo genérico.
+                                set_qtd_cartas_jogadores.set(visao.qtd_cartas_jogadores);
 
-                            set_timeout(
-                                move || {
-                                    // Recalcula o texto base (Sua vez / Vez do Jogador X)
-                                    let texto_base = if meu_id_local == turno_atual_local {
-                                        "SUA VEZ!".to_string()
+                                set_mesa_a.set(visao.mesa_time_a);
+                                set_mesa_b.set(visao.mesa_time_b);
+
+                                set_pontuacao_a.set(visao.pontuacao_a);
+                                set_pontuacao_b.set(visao.pontuacao_b);
+
+                                set_tres_vermelhos_a.set(visao.tres_vermelho_time_a);
+                                set_tres_vermelhos_b.set(visao.tres_vermelho_time_b);
+
+                                set_sou_o_jogador_da_vez.set(visao.posso_jogar);
+
+                                // --- LÓGICA CORRIGIDA DE SOM E TURNO ---
+
+                                // 1. Captura o estado ANTIGO (antes de atualizar o sinal)
+                                let turno_antigo = turno_atual_id.get_untracked();
+
+                                // 2. Pega os dados NOVOS
+                                let turno_novo = visao.turno_atual;
+                                let sou_eu = visao.meu_id;
+
+                                // 3. AGORA SIM: Atualiza o estado visual para o novo
+                                set_turno_atual_id.set(turno_novo);
+
+                                // 4. Verifica se houve MUDANÇA para a MINHA vez
+                                if turno_novo == sou_eu {
+                                    if turno_antigo != sou_eu {
+                                        leptos::logging::log!(
+                                            "🔔 [SOM] Mudança de turno detectada ({} -> {}). Tocando!",
+                                            turno_antigo,
+                                            turno_novo
+                                        );
+                                        tocar_som_sua_vez();
+                                        add_toast("Sua vez de jogar!".to_string(), ToastType::Info);
                                     } else {
-                                        format!("Vez do Jogador: {}", turno_atual_local)
-                                    };
-                                    // Atualiza o status removendo o "ERRO"
-                                    set_status_jogo.set(texto_base);
-                                },
-                                Duration::from_secs(2),
-                            );
+                                        leptos::logging::log!(
+                                            "ℹ️ [SOM] Já era minha vez. Silêncio."
+                                        );
+                                    }
+                                } else {
+                                    leptos::logging::log!(
+                                        "zzz [SOM] Vez do jogador {}.",
+                                        turno_novo
+                                    );
+                                }
+
+                                // ---------------------------------------
+
+                                // Atualiza texto de status (com número da rodada apenas)
+                                // O "Vez de..." agora é calculado no view!
+                                set_status_jogo.set(format!("Rodada {}", visao.rodada));
+
+                                set_jogos_preparados.set(Vec::new());
+
+                                set_qtd_monte.set(visao.qtd_monte);
+                                set_qtd_lixo.set(visao.qtd_lixo);
+
+                                let nome_arquivo = verso_para_asset(visao.verso_topo);
+                                set_verso_monte.set(nome_arquivo.to_string());
+                            }
+                            MsgServidor::Erro(e) => {
+                                add_toast(format!("ERRO: {}", e), ToastType::Error);
+                                selected_indices.update(|s| s.clear());
+
+                                let jogos_pendentes = jogos_preparados.get();
+                                if !jogos_pendentes.is_empty() {
+                                    set_minha_mao.update(|mao| {
+                                        for jogo in jogos_pendentes {
+                                            mao.extend(jogo);
+                                        }
+                                        mao.sort();
+                                    });
+                                    set_jogos_preparados.set(Vec::new());
+                                }
+
+                                // Não precisamos mais do set_timeout para corrigir o texto,
+                                // pois o view! é reativo e recalcula tudo automaticamente.
+                            }
+                            MsgServidor::Notificacao(n) => {
+                                add_toast(n, ToastType::Info);
+                            }
+                            MsgServidor::FimDeJogo { vencedor_time, .. } => {
+                                set_status_jogo.set(format!("Vencedor: Time {}", vencedor_time));
+                            }
                         }
-                        Ok(MsgServidor::Notificacao(n)) => {
-                            leptos::logging::log!("Notificação: {}", n);
-                            add_toast(n, ToastType::Info);
-                        }
-                        Ok(MsgServidor::FimDeJogo { vencedor_time, .. }) => {
-                            set_status_jogo.set(format!("Vencedor: Time {}", vencedor_time));
-                        }
-                        _ => {}
+                    }
+                    // TENTATIVA 2: É a lista de nomes?
+                    else if let Ok(evento) = serde_json::from_str::<EventoNomes>(&text) {
+                        leptos::logging::log!("👥 [NOMES] Recebi lista: {:?}", evento.mapa);
+                        set_mapa_nomes.set(evento.mapa);
                     }
                 }
             }
+
             set_status_jogo.set("Desconectado.".to_string());
         });
     });
@@ -370,11 +422,7 @@ pub fn App() -> impl IntoView {
         let mao_atual = minha_mao.get();
         let indices_set = selected_indices.get();
 
-        leptos::logging::log!("Indices selecionados: {:?}", indices_set);
-        leptos::logging::log!("Tamanho da mão: {}", mao_atual.len());
-
         if indices_set.len() < 3 {
-            leptos::logging::log!("Menos de 3 cartas selecionadas, cancelando.");
             return;
         }
 
@@ -391,12 +439,6 @@ pub fn App() -> impl IntoView {
             .into_iter()
             .map(|(_, c)| c)
             .collect();
-
-        leptos::logging::log!(
-            "Baixando {} cartas. Restam {} na mão.",
-            cartas_para_baixar.len(),
-            nova_mao.len()
-        );
 
         set_jogos_preparados.update(|jogos| {
             jogos.push(cartas_para_baixar);
@@ -479,14 +521,12 @@ pub fn App() -> impl IntoView {
     };
 
     let acao_ajuntar = move |idx_jogo_mesa: usize| {
-        // 1. Verifica se tem cartas selecionadas na mão
         let indices = selected_indices.get();
         if indices.is_empty() {
             let _ = window().alert_with_message("Selecione cartas da mão primeiro para ajuntar!");
             return;
         }
 
-        // 2. Pega as cartas reais baseadas nos índices
         let cartas_selecionadas: Vec<Carta> = minha_mao.with(|mao| {
             indices
                 .iter()
@@ -494,7 +534,6 @@ pub fn App() -> impl IntoView {
                 .collect()
         });
 
-        // 3. Descobre o ID real do jogo no servidor (Time A ou B)
         let sou_time_a = meu_id.get() % 2 == 0;
         let id_jogo_real = if sou_time_a {
             mesa_a.with(|m| m.get(idx_jogo_mesa).map(|jogo| jogo.id))
@@ -503,32 +542,20 @@ pub fn App() -> impl IntoView {
         };
 
         if let Some(id_real) = id_jogo_real {
-            // --- LÓGICA MÁGICA AQUI ---
             if lixo_selecionado.get() {
-                // CENÁRIO: Quero pegar o lixo ajuntando neste jogo existente.
-
-                // Monta a tupla (ID_DO_JOGO, CARTAS_DA_MÃO)
                 let ajunte_do_lixo = vec![(id_real, cartas_selecionadas)];
-
-                // Se o usuário TIVER jogos novos preparados na área flutuante, mandamos junto
-                // (Caso ele queira baixar um jogo novo E ajuntar no velho ao mesmo tempo pra pegar o lixo)
                 let jogos_novos_guardados = jogos_preparados.get();
 
-                leptos::logging::log!("Enviando ComprarLixo via Ajunte no jogo ID: {}", id_real);
-
-                // Envia direto! Não espera botão de confirmar.
                 enviar_acao(AcaoJogador::ComprarLixo {
                     novos_jogos: jogos_novos_guardados,
                     cartas_em_jogos_existentes: ajunte_do_lixo,
                 });
 
-                // Limpa a bagunça da interface
                 set_lixo_selecionado.set(false);
-                set_ajuntes_lixo_preparados.set(Vec::new()); // Limpa buffer antigo se tiver
-                set_jogos_preparados.set(Vec::new()); // Limpa jogos novos pois já foram enviados
+                set_ajuntes_lixo_preparados.set(Vec::new());
+                set_jogos_preparados.set(Vec::new());
                 selected_indices.update(|s| s.clear());
             } else {
-                // CENÁRIO PADRÃO: Apenas ajuntar cartas da mão (sem envolver lixo)
                 enviar_acao(AcaoJogador::Ajuntar {
                     indice_jogo: id_real,
                     cartas: cartas_selecionadas,
@@ -536,8 +563,6 @@ pub fn App() -> impl IntoView {
 
                 selected_indices.update(|s| s.clear());
             }
-        } else {
-            leptos::logging::error!("Jogo não encontrado no índice visual {}", idx_jogo_mesa);
         }
     };
 
@@ -550,12 +575,10 @@ pub fn App() -> impl IntoView {
     };
 
     view! {
-
         <Show
         when=move || in_game.get()
         fallback=move || view! { <LoginScreen on_enter=ao_entrar /> }
         >
-            // 1. DIV PRINCIPAL (Container Verde)
             <div style=move || {
                 let bg = if e_minha_vez() { "#388e3c" } else { "#1b5e20" };
                 format!("background-color: {}; height: 100vh; display: flex; flex-direction: column; font-family: sans-serif; color: white; overflow: hidden; transition: background-color 0.5s;", bg)
@@ -570,11 +593,9 @@ pub fn App() -> impl IntoView {
                     align-items: center;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
                 ">
-                    // LADO ESQUERDO: Título, ID e Configuração
+                    // LADO ESQUERDO
                     <div style="display: flex; flex-direction: column; align-items: flex-start;">
                         <h1 style="margin: 0; font-size: 1.5rem; line-height: 1.2;">"Buracão Web"</h1>
-
-                        // Linha com ID e Engrenagem
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <small style="opacity: 0.8; font-size: 0.85rem;">
                                 {move || {
@@ -583,80 +604,64 @@ pub fn App() -> impl IntoView {
                                     format!("Meu ID: {} ({})", id, time)
                                 }}
                             </small>
-
-                            // BOTÃO DE CONFIGURAÇÃO (LIMPO)
                             <button
                                 on:click=move |_| set_show_settings.set(true)
                                 title="Configurações"
-                                style="
-                                    background: transparent;
-                                    border: none;
-                                    cursor: pointer;
-                                    font-size: 1.2rem;
-                                    padding: 0;
-                                    line-height: 1;
-                                    opacity: 0.7;
-                                    transition: opacity 0.2s, transform 0.2s;
-                                "
-                                on:mouseenter=move |e| {
-                                    let el = e.target().unwrap().unchecked_into::<web_sys::HtmlElement>();
-                                    let _ = el.style().set_property("opacity", "1");
-                                    let _ = el.style().set_property("transform", "rotate(45deg)");
-                                }
-                                on:mouseleave=move |e| {
-                                    let el = e.target().unwrap().unchecked_into::<web_sys::HtmlElement>();
-                                    let _ = el.style().set_property("opacity", "0.7");
-                                    let _ = el.style().set_property("transform", "rotate(0deg)");
-                                }
+                                style="background: transparent; border: none; cursor: pointer; font-size: 1.2rem; padding: 0; opacity: 0.7;"
                             >
                                 "⚙️"
                             </button>
                         </div>
 
-                // --- NOVOS BOTÕES ---
-                    <div style="display: flex; flex-direction: row; gap: 5px; margin-left: 15px;">
-                        <button
-                            on:click=acao_sair
-                            title="Sair da sala (Mantém ID)"
-                            style="background: #d32f2f; color: white; border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer; font-size: 0.8rem;"
-                        >
-                            "Sair"
-                        </button>
-                        <button
-                            on:click=acao_resetar
-                            title="Apagar sessão e gerar novo ID"
-                            style="background: #455a64; color: white; border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer; font-size: 0.8rem;"
-                        >
-                            "Novo ID"
-                        </button>
-                    </div>
-                    </div>
-
-
-                    // LADO DIREITO: Status e Placar
-                    <div style="text-align: right; display: flex; gap: 20px; align-items: center;">
-                        <div>
-                            <strong style="color: #ffeb3b; font-size: 1.1rem; text-shadow: 1px 1px 2px black; display: block;">
-                                {move || status_jogo.get()}
-                            </strong>
-
-                            // INDICADOR DE VEZ DO JOGADOR
-                            {move || {
-                                let vez = turno_atual_id.get();
-                                if vez != meu_id.get() {
-                                    view! { <span style="font-size: 11px; color: #ccc;">"Vez do Jogador: " {vez}</span> }.into_any()
-                                } else {
-                                    view! {}.into_any()
-                                }
-                            }}
+                        // NOVOS BOTÕES
+                        <div style="display: flex; flex-direction: row; gap: 5px; margin-left: 0px; margin-top: 5px;">
+                            <button
+                                on:click=acao_sair
+                                title="Sair da sala (Mantém ID)"
+                                style="background: #d32f2f; color: white; border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer; font-size: 0.8rem;"
+                            >
+                                "Sair"
+                            </button>
+                            <button
+                                on:click=acao_resetar
+                                title="Apagar sessão e gerar novo ID"
+                                style="background: #455a64; color: white; border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer; font-size: 0.8rem;"
+                            >
+                                "Novo ID"
+                            </button>
                         </div>
+                    </div>
 
-                        <Scoreboard
-                            pontuacao_a=pontuacao_a
-                            pontuacao_b=pontuacao_b
-                        />
+                    // LADO DIREITO: Status e Placar (ATUALIZADO)
+                    <div style="text-align: right; display: flex; gap: 20px; align-items: center;">
+                        <div style="text-align: right;">
+                            <strong style="color: #ffeb3b; font-size: 1.1rem; text-shadow: 1px 1px 2px black; display: block;">
+                                {move || {
+                                    let status = status_jogo.get();
+                                    // Pega o número da rodada (vem do set_status_jogo ou usa fallback)
+                                    // Assumindo que status_jogo é "Rodada X"
+
+                                    let vez_id = turno_atual_id.get();
+                                    let eu = meu_id.get();
+                                    let nomes = mapa_nomes.get();
+
+                                    let texto_vez = if vez_id == eu {
+                                        "SUA VEZ!".to_string()
+                                    } else {
+                                        // Busca o nome no mapa, ou usa o ID como fallback
+                                        let nome = nomes.get(&vez_id).cloned().unwrap_or(format!("Jogador {}", vez_id));
+                                        format!("Vez de {}", nome)
+                                    };
+
+                                    // Formatação final: "Rodada X. Vez de Fulano"
+                                    format!("{}. {}", status, texto_vez)
+                                }}
+                            </strong>
+                        </div>
+                        <Scoreboard pontuacao_a=pontuacao_a pontuacao_b=pontuacao_b />
                     </div>
                 </div>
+
                 // --- 2. ÁREA CENTRAL (Mesas e Board) ---
                 <div style="
                     flex: 1;
@@ -687,12 +692,11 @@ pub fn App() -> impl IntoView {
                     }}
 
                     // --- COLUNA CENTRAL (Board + Indicador) ---
-                    // Esta div agrupa os elementos verticalmente no centro
                     <div style="
                         display: flex;
                         flex-direction: column;
                         align-items: center;
-                        gap: 20px; /* Espaço entre o Lixo e a Bolinha */
+                        gap: 20px;
                         flex-shrink: 0;
                         margin-top: 40px;
                     ">
@@ -708,16 +712,18 @@ pub fn App() -> impl IntoView {
                             verso_monte=verso_monte
                         />
 
-                        // O Indicador agora está DENTRO da coluna central, logo abaixo do Board
+                        // O Indicador agora está DENTRO da coluna central
                         <div style="
-                            background: rgba(0,0,0,0.2); 
-                            padding: 10px; 
+                            background: rgba(0,0,0,0.2);
+                            padding: 10px;
                             border-radius: 50%;
                             border: 1px solid rgba(255,255,255,0.1);
                         ">
                             <TurnIndicator
                                 my_id=meu_id
                                 current_turn=turno_atual_id
+                                names=mapa_nomes
+                                cards_count=qtd_cartas_jogadores
                             />
                         </div>
                     </div>
@@ -749,7 +755,7 @@ pub fn App() -> impl IntoView {
                     position: relative;
                     z-index: 10;
                 ">
-                    // ÁREA DE PREPARAÇÃO (Flutuante sobre a mão)
+                    // ÁREA DE PREPARAÇÃO
                     {move || {
                         let jogos = jogos_preparados.get();
                         if !jogos.is_empty() {
@@ -824,11 +830,17 @@ pub fn App() -> impl IntoView {
                             on_close=Callback::new(move |_| set_show_settings.set(false))
                             current_theme_path=current_theme
                             card_scale=card_scale
+                            volume=volume
                         />
                     </div>
                 </div>
 
                 <NotificationToast toasts=toasts />
+                <audio
+                    node_ref=audio_ref
+                    src=SOUND_PATH
+                    style="display: none;"
+                />
             </div>
         </Show>
     }

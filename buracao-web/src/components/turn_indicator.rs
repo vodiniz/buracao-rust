@@ -1,120 +1,136 @@
 use leptos::prelude::*;
+use std::collections::HashMap;
 
-// 1. Função Pura: Define a cor baseada no ID (não muda)
-fn get_player_color(id: u32) -> &'static str {
-    match id % 4 {
-        0 => "#f44336", // Vermelho
-        1 => "#4caf50", // Verde
-        2 => "#29b6f6", // Azul
-        3 => "#ff9800", // Laranja
-        _ => "white",
-    }
-}
-
-// 2. Sub-componente para a Bolinha (Resolve o erro de closure)
-// Recebe um Signal ou bool para reatividade limpa
 #[component]
-fn TurnDot(#[prop(into)] is_active: Signal<bool>, player_id: u32) -> impl IntoView {
-    let base_color = get_player_color(player_id);
+fn TurnDot(
+    #[prop(into)] is_me: Signal<bool>,
+    #[prop(into)] is_turn: Signal<bool>,
+    rgb: (u8, u8, u8),
+    #[prop(into)] label: Signal<String>,
+) -> impl IntoView {
+    let (r, g, b) = rgb;
 
     view! {
         <div
-            title=format!("Jogador {}", player_id)
+            // O texto do tooltip (demora ~1s para aparecer no navegador)
+            title=move || label.get()
             style=move || {
-                let active = is_active.get();
-                // Lógica visual: Se ativo, brilha; se inativo, fica fosco
-                let opacity = if active { "1.0" } else { "0.3" };
-                let border = if active { "2px solid #ffeb3b" } else { "2px solid rgba(0,0,0,0.2)" };
-                let transform = if active { "scale(1.3)" } else { "scale(1.0)" };
-                let shadow = if active { format!("0 0 15px {}", base_color) } else { "none".to_string() };
+                let turn = is_turn.get();
+                let me = is_me.get();
+
+                let alpha = if turn { 1.0 } else { 0.3 };
+                let bg_color = format!("rgba({}, {}, {}, {})", r, g, b, alpha);
+
+                let border = if me { "3px solid #ffeb3b" } else { "3px solid transparent" };
+
+                let shadow_alpha = if turn { 0.8 } else { 0.0 };
+                // Aumentei o blur da sombra para acompanhar o tamanho maior
+                let shadow = format!("0 0 25px rgba({}, {}, {}, {})", r, g, b, shadow_alpha);
+
+                let transform = if turn { "scale(1.25)" } else { "scale(1.0)" };
 
                 format!("
-                    width: 14px;
-                    height: 14px;
+                    width: 40px;  
+                    height: 40px; 
                     border-radius: 50%;
+                    box-sizing: border-box;
                     background-color: {};
                     border: {};
                     box-shadow: {};
                     transform: {};
-                    opacity: {};
-                    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-                ", base_color, border, shadow, transform, opacity)
+                    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+                    cursor: pointer;
+                ", bg_color, border, shadow, transform)
             }
         ></div>
     }
 }
 
-// 3. Componente Principal
 #[component]
 pub fn TurnIndicator(
     #[prop(into)] my_id: Signal<u32>,
     #[prop(into)] current_turn: Signal<u32>,
+    names: ReadSignal<HashMap<u32, String>>,
+    cards_count: ReadSignal<Vec<usize>>,
 ) -> impl IntoView {
+    // Cores Base em RGB
+    let blue_rgb = (41, 182, 246); // #29b6f6
+    let orange_rgb = (255, 152, 0); // #ff9800
+    let green_rgb = (76, 175, 80); // #4caf50
+    let red_rgb = (244, 67, 54); // #f44336
+
+    // Helper para criar o texto do label dinamicamente
+    let make_label = move |target_id: u32| {
+        Signal::derive(move || {
+            let all_names = names.get();
+            let all_counts = cards_count.get();
+
+            let name = all_names
+                .get(&target_id)
+                .cloned()
+                .unwrap_or(format!("Jogador {}", target_id));
+            let count = all_counts.get(target_id as usize).copied().unwrap_or(0);
+
+            format!("{}\n{} Cartas", name, count)
+        })
+    };
+
     view! {
         <div style="
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
             grid-template-rows: 1fr 1fr 1fr;
-            gap: 8px;
-            width: 70px;
-            height: 70px;
+            gap: 20px;    /* Aumentado o gap para espalhar as bolinhas */
+            width: 180px; /* Aumentado de 80px para 180px (Tamanho aproximado do Monte+Lixo) */
+            height: 180px;/* Aumentado de 80px para 180px (Para manter circular) */
             align-items: center;
             justify-items: center;
         ">
-            // --- TOPO: Parceiro (Eu + 2) ---
+            // TOPO (Norte) - Jogador 2 (Azul)
             <div style="grid-column: 2; grid-row: 1;">
-                {move || {
-                    let eu = my_id.get();
-                    let parceiro_id = (eu + 2) % 4;
-                    // Usamos Signal::derive para passar a reatividade para o sub-componente
-                    view! {
-                        <TurnDot
-                            is_active=Signal::derive(move || current_turn.get() == parceiro_id)
-                            player_id=parceiro_id
-                        />
-                    }
+                {move || view! {
+                    <TurnDot
+                        is_me=Signal::derive(move || my_id.get() == 2)
+                        is_turn=Signal::derive(move || current_turn.get() == 2)
+                        rgb=blue_rgb
+                        label=make_label(2)
+                    />
                 }}
             </div>
 
-            // --- ESQUERDA: Anterior (Eu + 3) ---
-            // Sentido anti-horário de "quem jogou antes" na esquerda
+            // ESQUERDA (Oeste) - Jogador 3 (Laranja)
             <div style="grid-column: 1; grid-row: 2;">
-                {move || {
-                    let eu = my_id.get();
-                    let anterior_id = (eu + 3) % 4;
-                    view! {
-                        <TurnDot
-                            is_active=Signal::derive(move || current_turn.get() == anterior_id)
-                            player_id=anterior_id
-                        />
-                    }
+                {move || view! {
+                    <TurnDot
+                        is_me=Signal::derive(move || my_id.get() == 3)
+                        is_turn=Signal::derive(move || current_turn.get() == 3)
+                        rgb=orange_rgb
+                        label=make_label(3)
+                    />
                 }}
             </div>
 
-            // --- DIREITA: Próximo (Eu + 1) ---
+            // DIREITA (Leste) - Jogador 1 (Verde)
             <div style="grid-column: 3; grid-row: 2;">
-                {move || {
-                    let eu = my_id.get();
-                    let proximo_id = (eu + 1) % 4;
-                    view! {
-                        <TurnDot
-                            is_active=Signal::derive(move || current_turn.get() == proximo_id)
-                            player_id=proximo_id
-                        />
-                    }
+                {move || view! {
+                    <TurnDot
+                        is_me=Signal::derive(move || my_id.get() == 1)
+                        is_turn=Signal::derive(move || current_turn.get() == 1)
+                        rgb=green_rgb
+                        label=make_label(1)
+                    />
                 }}
             </div>
 
-            // --- BAIXO: Eu Mesmo ---
+            // BAIXO (Sul) - Jogador 0 (Vermelho)
             <div style="grid-column: 2; grid-row: 3;">
-                {move || {
-                    let eu = my_id.get();
-                    view! {
-                        <TurnDot
-                            is_active=Signal::derive(move || current_turn.get() == eu)
-                            player_id=eu
-                        />
-                    }
+                {move || view! {
+                    <TurnDot
+                        is_me=Signal::derive(move || my_id.get() == 0)
+                        is_turn=Signal::derive(move || current_turn.get() == 0)
+                        rgb=red_rgb
+                        label=make_label(0)
+                    />
                 }}
             </div>
         </div>
