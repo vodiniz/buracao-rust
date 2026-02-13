@@ -84,11 +84,3 @@ pub fn validar_jogo(cartas: &[Carta]) -> bool {
 pub fn tem_coringa(jogo: &[Carta]) -> bool {
     jogo.iter().any(|c| c.eh_coringa())
 }
-
-#[allow(dead_code)]
-fn calcula_pontos_jogos(jogos_mesa: &Vec<Vec<Carta>>) -> i32 {
-    jogos_mesa
-        .iter()
-        .map(|jogo| jogo.iter().map(|c| c.pontos()).sum::<i32>())
-        .sum()
-}

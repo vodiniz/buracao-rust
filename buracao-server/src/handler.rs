@@ -8,7 +8,7 @@ use warp::ws::{Message, WebSocket};
 
 #[derive(Deserialize, Debug)]
 struct MensagemLogin {
-    tipo: String,
+    // tipo: String,
     device_id: String,
     nome: String,
     sala: String,
@@ -29,7 +29,7 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
     // Tarefa para encaminhar mensagens do servidor -> cliente
     tokio::task::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            if let Err(_) = ws_tx.send(msg).await {
+            if ws_tx.send(msg).await.is_err() {
                 break;
             }
         }
@@ -37,27 +37,19 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
 
     println!("⏳ Nova conexão... aguardando Login.");
 
-    // 1. ESPERA O LOGIN (Handshake)
-    let login_data: MensagemLogin;
-
-    if let Some(result) = ws_rx.next().await {
-        if let Ok(msg) = result {
-            if let Ok(texto) = msg.to_str() {
-                if let Ok(dados) = serde_json::from_str::<MensagemLogin>(texto) {
-                    login_data = dados;
-                } else {
+    let login_data: MensagemLogin = match ws_rx.next().await {
+        Some(Ok(msg)) => match msg.to_str() {
+            Ok(texto) => match serde_json::from_str::<MensagemLogin>(texto) {
+                Ok(dados) => dados,
+                Err(_) => {
                     println!("❌ JSON inválido recebido.");
                     return;
                 }
-            } else {
-                return;
-            }
-        } else {
-            return;
-        }
-    } else {
-        return;
-    }
+            },
+            Err(_) => return,
+        },
+        _ => return,
+    };
 
     println!(
         "🔑 Login na sala '{}': {} ({})",
@@ -138,39 +130,42 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
     }
 
     // 4. LOOP DO JOGO
-    while let Some(result) = ws_rx.next().await {
-        if let Ok(msg) = result {
-            if let Ok(texto) = msg.to_str() {
-                if let Ok(acao) = serde_json::from_str::<AcaoJogador>(texto) {
-                    let mut room = room_ref.write().await;
+    while let Some(Ok(msg)) = ws_rx.next().await {
+        let texto = match msg.to_str() {
+            Ok(t) => t,
+            Err(_) => continue, // ignora mensagens não-texto / inválidas
+        };
 
-                    let resultado = room.game_state.realizar_acao(my_player_id, acao);
+        let acao: AcaoJogador = match serde_json::from_str(texto) {
+            Ok(a) => a,
+            Err(_) => continue, // ignora JSON inválido
+        };
 
-                    // Lógica de resposta e broadcast
-                    match resultado {
-                        Ok(msg_sucesso) => {
-                            // 1. Broadcast do Estado para TODOS
-                            for (pid, client_tx) in room.clients.iter() {
-                                let visao = room.game_state.gerar_visao_para_jogador(*pid);
-                                let envelope = MsgServidor::Estado(visao);
-                                if let Ok(json) = serde_json::to_string(&envelope) {
-                                    let _ = client_tx.send(Message::text(json));
-                                }
-                            }
-                            // 2. Notificação de sucesso só para quem jogou
-                            if let Ok(json) =
-                                serde_json::to_string(&MsgServidor::Notificacao(msg_sucesso))
-                            {
-                                let _ = tx.send(Message::text(json));
-                            }
-                        }
-                        Err(erro) => {
-                            // Erro só para quem jogou
-                            if let Ok(json) = serde_json::to_string(&MsgServidor::Erro(erro)) {
-                                let _ = tx.send(Message::text(json));
-                            }
-                        }
+        let mut room = room_ref.write().await;
+
+        let resultado = room.game_state.realizar_acao(my_player_id, acao);
+
+        match resultado {
+            Ok(msg_sucesso) => {
+                // 1. Broadcast do Estado para TODOS
+                for (pid, client_tx) in room.clients.iter() {
+                    let visao = room.game_state.gerar_visao_para_jogador(*pid);
+                    let envelope = MsgServidor::Estado(visao);
+
+                    if let Ok(json) = serde_json::to_string(&envelope) {
+                        let _ = client_tx.send(Message::text(json));
                     }
+                }
+
+                // 2. Notificação de sucesso só para quem jogou
+                if let Ok(json) = serde_json::to_string(&MsgServidor::Notificacao(msg_sucesso)) {
+                    let _ = tx.send(Message::text(json));
+                }
+            }
+            Err(erro) => {
+                // Erro só para quem jogou
+                if let Ok(json) = serde_json::to_string(&MsgServidor::Erro(erro)) {
+                    let _ = tx.send(Message::text(json));
                 }
             }
         }

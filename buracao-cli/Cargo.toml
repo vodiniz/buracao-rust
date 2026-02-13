@@ -1,9 +1,0 @@
-
-[package]
-name = "buracao-cli"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-# Importa nossa biblioteca de lógica local
-buracao-core = { path = "../buracao-core" }

@@ -24,7 +24,6 @@ fn TurnDot(
                 let border = if me { "3px solid #ffeb3b" } else { "3px solid transparent" };
 
                 let shadow_alpha = if turn { 0.8 } else { 0.0 };
-                // Aumentei o blur da sombra para acompanhar o tamanho maior
                 let shadow = format!("0 0 25px rgba({}, {}, {}, {})", r, g, b, shadow_alpha);
 
                 let transform = if turn { "scale(1.25)" } else { "scale(1.0)" };

@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use web_sys::MouseEvent; // <--- Importante
+use web_sys::MouseEvent;
 
 #[component]
 pub fn GameControls(
@@ -7,7 +7,7 @@ pub fn GameControls(
     #[prop(into)] lixo_selecionado: Signal<bool>,
     #[prop(into)] tem_jogos_preparados: Signal<bool>,
 
-    // AÇÕES: Agora tipadas explicitamente como MouseEvent para compatibilidade
+    // AÇÕES
     #[prop(into)] on_descartar: Callback<MouseEvent>,
     #[prop(into)] on_separar: Callback<MouseEvent>,
     #[prop(into)] on_ordenar: Callback<MouseEvent>,
@@ -29,53 +29,51 @@ pub fn GameControls(
         ">
 
             // --- 1. MODO LIXO ATIVO ---
-            {move || if lixo_selecionado.get() {
-                view! {
-                    <div style="background: rgba(255, 193, 7, 0.15); padding: 10px; border-radius: 8px; border: 1px solid #ffc107; text-align: center;">
-                        <span style="display: block; color: #ffc107; font-size: 11px; margin-bottom: 8px; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">
-                            "Modo Compra de Lixo"
-                        </span>
-                        <div style="display: flex; gap: 8px; justify-content: center;">
-                            <button
-                                on:click=move |ev| on_confirmar_lixo.run(ev)
-                                style="flex: 1; background: #ffc107; color: black; border: none; padding: 8px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px;"
-                            >
-                                "CONFIRMAR"
-                            </button>
-                            <button
-                                on:click=move |ev| on_cancelar_lixo.run(ev)
-                                style="flex: 1; background: transparent; border: 1px solid #ffc107; color: #ffc107; padding: 8px; border-radius: 4px; cursor: pointer; font-size: 12px;"
-                            >
-                                "CANCELAR"
-                            </button>
-                        </div>
+            <Show
+                when=move || lixo_selecionado.get()
+                fallback=|| ()
+            >
+                <div style="background: rgba(255, 193, 7, 0.15); padding: 10px; border-radius: 8px; border: 1px solid #ffc107; text-align: center;">
+                    <span style="display: block; color: #ffc107; font-size: 11px; margin-bottom: 8px; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">
+                        "Modo Compra de Lixo"
+                    </span>
+                    <div style="display: flex; gap: 8px; justify-content: center;">
+                        <button
+                            on:click=move |ev| on_confirmar_lixo.run(ev)
+                            style="flex: 1; background: #ffc107; color: black; border: none; padding: 8px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px;"
+                        >
+                            "CONFIRMAR"
+                        </button>
+                        <button
+                            on:click=move |ev| on_cancelar_lixo.run(ev)
+                            style="flex: 1; background: transparent; border: 1px solid #ffc107; color: #ffc107; padding: 8px; border-radius: 4px; cursor: pointer; font-size: 12px;"
+                        >
+                            "CANCELAR"
+                        </button>
                     </div>
-                }.into_any()
-            } else {
-                view! {}.into_any()
-            }}
+                </div>
+            </Show>
 
             // --- 2. MODO BAIXAR JOGOS ---
-            {move || if tem_jogos_preparados.get() && !lixo_selecionado.get() {
-                view! {
-                    <button
-                        on:click=move |ev| on_confirmar_baixa.run(ev)
-                        style="
-                            background: linear-gradient(45deg, #2e7d32, #43a047);
-                            color: white; border: none; padding: 12px; 
-                            border-radius: 6px; font-weight: bold; cursor: pointer; 
-                            width: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-                            font-size: 13px; letter-spacing: 0.5px;
-                        "
-                    >
-                        "BAIXAR JOGOS SEPARADOS"
-                    </button>
-                }.into_any()
-            } else {
-                view! {}.into_any()
-            }}
+            <Show
+                when=move || tem_jogos_preparados.get() && !lixo_selecionado.get()
+                fallback=|| ()
+            >
+                <button
+                    on:click=move |ev| on_confirmar_baixa.run(ev)
+                    style="
+                        background: linear-gradient(45deg, #2e7d32, #43a047);
+                        color: white; border: none; padding: 12px; 
+                        border-radius: 6px; font-weight: bold; cursor: pointer; 
+                        width: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+                        font-size: 13px; letter-spacing: 0.5px;
+                    "
+                >
+                    "BAIXAR JOGOS SEPARADOS"
+                </button>
+            </Show>
 
-            // --- 3. AÇÕES PADRÃO ---
+            // --- 3. AÇÕES PADRÃO (Sempre visíveis) ---
             <div style="display: flex; gap: 10px;">
                 <button
                     on:click=move |ev| on_separar.run(ev)

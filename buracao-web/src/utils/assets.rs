@@ -1,5 +1,4 @@
 // Caminho base configurado no Trunk ou servidor de arquivos
-const CARDS_BASE_PATH: &str = "/assets/cards/PaperCards";
 
 #[derive(Clone, Copy)]
 pub enum CardTheme {

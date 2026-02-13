@@ -7,7 +7,6 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde_json;
 use std::collections::HashSet;
-use std::time::Duration;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::components::board::Board;
@@ -65,7 +64,7 @@ const SOUND_PATH: &str = "/assets/audio/my_turn_xylophone.wav";
 #[component]
 pub fn App() -> impl IntoView {
     let (turno_atual_id, set_turno_atual_id) = signal(0_u32);
-    let (minha_mao, set_minha_mao) = signal(Vec::<Carta>::new());
+    let minha_mao = RwSignal::new(Vec::<Carta>::new());
     let (lixo_topo, set_lixo_topo) = signal(Option::<Carta>::None);
     let (jogos_preparados, set_jogos_preparados) = signal(Vec::<Vec<Carta>>::new());
     let (ajuntes_lixo_preparados, set_ajuntes_lixo_preparados) =
@@ -134,7 +133,7 @@ pub fn App() -> impl IntoView {
     };
 
     let ao_entrar = Callback::new(move |(nome, sala): (String, String)| {
-        set_minha_mao.set(Vec::new());
+        minha_mao.set(Vec::new());
         set_mesa_a.set(Vec::new());
         set_mesa_b.set(Vec::new());
         set_jogos_preparados.set(Vec::new());
@@ -275,7 +274,7 @@ pub fn App() -> impl IntoView {
                             }
                             MsgServidor::Estado(visao) => {
                                 // 1. Atualiza dados básicos
-                                set_minha_mao.set(visao.minha_mao);
+                                minha_mao.set(visao.minha_mao);
                                 set_lixo_topo.set(visao.lixo);
                                 set_meu_id.set(visao.meu_id);
 
@@ -346,7 +345,7 @@ pub fn App() -> impl IntoView {
 
                                 let jogos_pendentes = jogos_preparados.get();
                                 if !jogos_pendentes.is_empty() {
-                                    set_minha_mao.update(|mao| {
+                                    minha_mao.update(|mao| {
                                         for jogo in jogos_pendentes {
                                             mao.extend(jogo);
                                         }
@@ -403,21 +402,6 @@ pub fn App() -> impl IntoView {
         }
     };
 
-    let reset_preparacao = move || {
-        let preparados = jogos_preparados.get();
-        if preparados.is_empty() {
-            return;
-        }
-
-        set_minha_mao.update(|mao| {
-            for jogo in preparados {
-                mao.extend(jogo);
-            }
-            mao.sort();
-        });
-        set_jogos_preparados.set(Vec::new());
-    };
-
     let acao_separar = move |_| {
         let mao_atual = minha_mao.get();
         let indices_set = selected_indices.get();
@@ -444,7 +428,7 @@ pub fn App() -> impl IntoView {
             jogos.push(cartas_para_baixar);
         });
 
-        set_minha_mao.set(nova_mao);
+        minha_mao.set(nova_mao);
         selected_indices.update(|s| s.clear());
     };
 
@@ -458,7 +442,7 @@ pub fn App() -> impl IntoView {
         });
 
         if let Some(cartas) = jogo_removido {
-            set_minha_mao.update(|mao| {
+            minha_mao.update(|mao| {
                 mao.extend(cartas);
                 mao.sort();
             });
@@ -506,7 +490,7 @@ pub fn App() -> impl IntoView {
         }
 
         enviar_acao(AcaoJogador::ComprarLixo {
-            novos_jogos: novos_jogos,
+            novos_jogos,
             cartas_em_jogos_existentes: ajuntes_guardados,
         });
 
@@ -569,7 +553,7 @@ pub fn App() -> impl IntoView {
     let e_minha_vez = move || sou_o_jogador_da_vez.get();
 
     let acao_organizar = move |_: web_sys::MouseEvent| {
-        set_minha_mao.update(|mao| {
+        minha_mao.update(|mao| {
             mao.sort();
         });
     };
@@ -756,38 +740,34 @@ pub fn App() -> impl IntoView {
                     z-index: 10;
                 ">
                     // ÁREA DE PREPARAÇÃO
-                    {move || {
-                        let jogos = jogos_preparados.get();
-                        if !jogos.is_empty() {
-                            view! {
-                                <div style="display: flex; justify-content: center; margin-bottom: 10px;">
-                                    <div style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px; border: 1px dashed #ffeb3b; text-align: center;">
-                                        <h4 style="margin: 0 0 10px 0; color: #ffeb3b; font-size: 12px;">"Jogos a Baixar"</h4>
-                                        <div style="display: flex; gap: 10px;">
-                                            {jogos.into_iter().enumerate().map(|(idx, cartas)| {
-                                                view! {
-                                                    <div on:click=move |_| acao_devolver(idx) style="cursor: pointer; display: flex; transform: scale(0.8);">
-                                                        {cartas.into_iter().map(|c| view! {
-                                                            <CardImage
-                                                                carta=c
-                                                                width="40px"
-                                                                theme=current_theme.get()
-                                                            />
-                                                        }).collect::<Vec<_>>()}
-                                                    </div>
-                                                }
-                                            }).collect::<Vec<_>>()}
-                                        </div>
-                                        <button on:click=move |ev| acao_confirmar_baixa(ev) style="margin-top: 5px; background: #2e7d32; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer;">
-                                            "Confirmar"
-                                        </button>
-                                    </div>
+                    <Show
+                        when=move || !jogos_preparados.get().is_empty()
+                        fallback=|| () // <--- Aqui está a mágica: fallback limpo, sem into_any()
+                    >
+                        <div style="display: flex; justify-content: center; margin-bottom: 10px;">
+                            <div style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px; border: 1px dashed #ffeb3b; text-align: center;">
+                                <h4 style="margin: 0 0 10px 0; color: #ffeb3b; font-size: 12px;">"Jogos a Baixar"</h4>
+                                <div style="display: flex; gap: 10px;">
+                                    // Usamos um move || aqui dentro para iterar sobre os jogos reativamente
+                                    {move || jogos_preparados.get().into_iter().enumerate().map(|(idx, cartas)| {
+                                        view! {
+                                            <div on:click=move |_| acao_devolver(idx) style="cursor: pointer; display: flex; transform: scale(0.8);">
+                                                {cartas.into_iter().map(|c| view! {
+                                                    <CardImage carta=c width="40px" theme=current_theme.get() />
+                                                }).collect::<Vec<_>>()}
+                                            </div>
+                                        }
+                                    }).collect::<Vec<_>>()}
                                 </div>
-                            }.into_any()
-                        } else {
-                            view! {}.into_any()
-                        }
-                    }}
+                                <button
+                                    on:click=acao_confirmar_baixa
+                                    style="margin-top: 5px; background: #2e7d32; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer;"
+                                >
+                                    "Confirmar"
+                                </button>
+                            </div>
+                        </div>
+                    </Show>
 
                     // CONTAINER FLEX: CONTROLES + MÃO
                     <div style="display: flex; align-items: flex-end; gap: 20px; width: 100%; overflow: hidden; padding: 0 20px;">

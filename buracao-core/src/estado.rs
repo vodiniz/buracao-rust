@@ -1,6 +1,6 @@
 use crate::acoes::AcaoJogador;
 use crate::acoes::{DetalheJogo, VisaoJogador};
-use crate::baralho::{self, Baralho, Carta}; // Importa do módulo vizinho
+use crate::baralho::{Baralho, Carta}; // Importa do módulo vizinho
 use crate::regras::{tem_coringa, validar_jogo};
 use crate::Verso;
 use serde::{Deserialize, Serialize};
@@ -113,7 +113,7 @@ impl EstadoJogo {
             self.processar_tres_vermelhos(jogador_idx);
         }
         self.qtd_monte = self.baralho.cartas.len() as u32;
-        self.verso_topo = self.baralho.cartas.last().map(|c| c.verso.clone());
+        self.verso_topo = self.baralho.cartas.last().map(|c| c.verso);
     }
 
     pub fn processar_tres_vermelhos(&mut self, jogador_id: usize) {
@@ -157,7 +157,7 @@ impl EstadoJogo {
             // e cai no 'break'.
         }
 
-        self.maos[jogador_id].sort();
+        // self.maos[jogador_id].sort();
     }
 
     fn pontos_para_descer(&self, id_jogador: u32) -> i32 {
@@ -176,7 +176,7 @@ impl EstadoJogo {
 
     pub fn conferir_real(&self, id_jogador: usize) -> bool {
         // 1. Seleciona o vetor do time correto (sem clonar!)
-        let jogos_do_time = if id_jogador % 2 == 0 {
+        let jogos_do_time = if id_jogador.is_multiple_of(2) {
             &self.jogos_time_a
         } else {
             &self.jogos_time_b
@@ -281,22 +281,6 @@ impl EstadoJogo {
         self.contar_pontos_final();
 
         // reiniciar jogo
-    }
-    #[allow(dead_code)]
-    fn pode_bater(&self, id_jogador: usize) -> Result<(), String> {
-        // Regra 1: Proibido bater se comprou o lixo nesta rodada
-        if self.pegou_lixo_nesta_rodada {
-            return Err("Você não pode bater na mesma rodada que comprou o lixo.".to_string());
-        }
-
-        // Regra 2: Só pode bater se tiver Canastra Real (Limpa)
-        if !self.conferir_real(id_jogador) {
-            return Err(
-                "Para bater, seu time precisa de pelo menos uma Canastra Real.".to_string(),
-            );
-        }
-
-        Ok(())
     }
 
     // Função auxiliar para penalizar quem ficou com cartas na mão
@@ -508,7 +492,7 @@ impl EstadoJogo {
 
         self.comprou_nesta_rodada = true;
         self.pegou_lixo_nesta_rodada = true;
-        self.maos[jogador_idx].sort();
+        // self.maos[jogador_idx].sort();
 
         Ok(())
     }
@@ -607,7 +591,7 @@ impl EstadoJogo {
         }
 
         // Opcional: manter a mão organizada
-        self.maos[jogador_idx].sort();
+        // self.maos[jogador_idx].sort();
 
         Ok(())
     }
@@ -728,15 +712,13 @@ impl EstadoJogo {
         if lixo_vazio || lixo_travado {
             // Se não tem baralho e o lixo não pode ser pego, ACABOU.
             self.encerrar_partida_por_esgotamento();
-            return Err(
-                "O baralho acabou e o lixo está vazio ou travado. Fim de jogo.".to_string(),
-            );
+            Err("O baralho acabou e o lixo está vazio ou travado. Fim de jogo.".to_string())
         } else {
             // O baralho acabou, mas o lixo está disponível.
             // Marcamos a flag para saber que o jogo deve acabar logo após esse turno.
             self.baralho_acabou_nesta_rodada = true;
 
-            return Err("O baralho acabou! Esta é a última chance. Você deve tentar comprar o lixo (fazer jogo/ajunte) ou o jogo encerrará.".to_string());
+            Err("O baralho acabou! Esta é a última chance. Você deve tentar comprar o lixo (fazer jogo/ajunte) ou o jogo encerrará.".to_string())
         }
     }
 
@@ -952,7 +934,7 @@ impl EstadoJogo {
 
             qtd_lixo: self.qtd_lixo,
             qtd_monte: self.qtd_monte,
-            verso_topo: self.verso_topo.clone(),
+            verso_topo: self.verso_topo,
             // Assumindo que você tem lógica de morto, senão hardcode false
         }
     }
@@ -994,7 +976,7 @@ impl EstadoJogo {
 
             qtd_lixo: self.qtd_lixo,
             qtd_monte: self.qtd_monte,
-            verso_topo: self.verso_topo.clone(),
+            verso_topo: self.verso_topo,
         }
     }
 

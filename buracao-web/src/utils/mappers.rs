@@ -1,5 +1,4 @@
 use buracao_core::baralho::{Carta, Naipe, Valor, Verso};
-use std::collections::HashMap;
 
 pub fn carta_para_asset(carta: &Carta) -> String {
     let valor_str = match carta.valor {
@@ -68,55 +67,12 @@ pub fn verso_para_asset(verso: Option<Verso>) -> String {
     }
 }
 
-// pub fn carta_para_asset_path(carta: &Carta) -> String {
-//     let id_arquivo = match carta.valor {
-//         Valor::Joker => "joker_r".to_string(), // Coringa Vermelho
-//         _ => {
-//             let valor_str = match carta.valor {
-//                 Valor::As => "a",
-//                 Valor::Valete => "j",
-//                 Valor::Dama => "q",
-//                 Valor::Rei => "k",
-//                 Valor::Dez => "10",
-//                 v => {
-//                     // Para valores numéricos, usamos a representação simples
-//                     // Assumindo que seu enum Valor possa ser convertido ou comparado
-//                     match v {
-//                         Valor::Dois => "2",
-//                         Valor::Tres => "3",
-//                         Valor::Quatro => "4",
-//                         Valor::Cinco => "5",
-//                         Valor::Seis => "6",
-//                         Valor::Sete => "7",
-//                         Valor::Oito => "8",
-//                         Valor::Nove => "9",
-//                         _ => "unknown",
-//                     }
-//                 }
-//             };
-//
-//             let naipe_str = match carta.naipe {
-//                 Naipe::Paus => "c",
-//                 Naipe::Ouros => "d",
-//                 Naipe::Copas => "h",
-//                 Naipe::Espadas => "s",
-//                 Naipe::Nenhum => "joker",
-//             };
-//
-//             format!("{}_{}", naipe_str, valor_str)
-//         }
-//     };
-//
-//     get_card_path(&id_arquivo)
-// }
-
 pub fn organizar_para_exibicao(cartas: &[Carta]) -> Vec<Carta> {
     if cartas.is_empty() {
         return vec![];
     }
 
     // 1. Descobre o naipe (mantido para compatibilidade, embora não crítico para essa lógica visual específica)
-    let naipe_dominante = descobrir_naipe_dominante(cartas);
 
     let mut naturais = Vec::new();
     let mut curingas = Vec::new();
@@ -167,12 +123,7 @@ pub fn organizar_para_exibicao(cartas: &[Carta]) -> Vec<Carta> {
         let idx_ant = valor_visual(&anterior);
         let idx_atual = valor_visual(&carta_atual);
 
-        let gap = if idx_atual > idx_ant {
-            idx_atual - idx_ant
-        } else {
-            0
-        };
-
+        let gap = idx_atual.saturating_sub(idx_ant);
         // Se gap > 1 (Ex: tem 8 e 10, gap é 2), precisamos de (2-1) = 1 coringa no meio
         if gap > 1 {
             let buracos_para_tapar = gap - 1;
@@ -224,28 +175,4 @@ pub fn organizar_para_exibicao(cartas: &[Carta]) -> Vec<Carta> {
     }
 
     resultado
-}
-
-fn descobrir_naipe_dominante(cartas: &[Carta]) -> Option<Naipe> {
-    let mut contagem = HashMap::new();
-    for c in cartas {
-        // Ignora Jokers e 2 para contagem de naipe dominante inicial
-        if c.valor != Valor::Joker && c.valor != Valor::Dois {
-            *contagem.entry(c.naipe).or_insert(0) += 1;
-        }
-    }
-
-    // Se só tinha coringas/2, tenta contar com os 2
-    if contagem.is_empty() {
-        for c in cartas {
-            if c.valor == Valor::Dois {
-                *contagem.entry(c.naipe).or_insert(0) += 1;
-            }
-        }
-    }
-
-    contagem
-        .into_iter()
-        .max_by_key(|&(_, count)| count)
-        .map(|(n, _)| n)
 }

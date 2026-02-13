@@ -37,6 +37,8 @@ web-sys = { version = "0.3", features = [
   "Storage",
   "HtmlAudioElement",
   "HtmlMediaElement",
+  "DragEvent",
+  "DataTransfer",
 ] }
 console_error_panic_hook = "0.1" # Para ver erros do Rust no console do browser
 console_log = "1.0"
