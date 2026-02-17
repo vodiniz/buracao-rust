@@ -273,8 +273,14 @@ pub fn App() -> impl IntoView {
                                 leptos::logging::log!("👋 Boas vindas recebidas");
                             }
                             MsgServidor::Estado(visao) => {
+                                let mut nova_mao = visao.minha_mao;
+                                // 2. Ordena ela imediatamente (usa a implementação Ord de Carta)
+                                nova_mao.sort();
+                                // 3. Atualiza o sinal (dispara a re-renderização uma única vez já ordenado)
+                                minha_mao.set(nova_mao);
                                 // 1. Atualiza dados básicos
-                                minha_mao.set(visao.minha_mao);
+                                // minha_mao.set(visao.minha_mao);
+
                                 set_lixo_topo.set(visao.lixo);
                                 set_meu_id.set(visao.meu_id);
 
@@ -738,35 +744,35 @@ pub fn App() -> impl IntoView {
                     padding-bottom: 20px;
                     position: relative;
                     z-index: 10;
-                ">
-                    // ÁREA DE PREPARAÇÃO
-                    <Show
-                        when=move || !jogos_preparados.get().is_empty()
-                        fallback=|| () // <--- Aqui está a mágica: fallback limpo, sem into_any()
-                    >
-                        <div style="display: flex; justify-content: center; margin-bottom: 10px;">
-                            <div style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px; border: 1px dashed #ffeb3b; text-align: center;">
-                                <h4 style="margin: 0 0 10px 0; color: #ffeb3b; font-size: 12px;">"Jogos a Baixar"</h4>
-                                <div style="display: flex; gap: 10px;">
-                                    // Usamos um move || aqui dentro para iterar sobre os jogos reativamente
-                                    {move || jogos_preparados.get().into_iter().enumerate().map(|(idx, cartas)| {
-                                        view! {
-                                            <div on:click=move |_| acao_devolver(idx) style="cursor: pointer; display: flex; transform: scale(0.8);">
-                                                {cartas.into_iter().map(|c| view! {
-                                                    <CardImage carta=c width="40px" theme=current_theme.get() />
-                                                }).collect::<Vec<_>>()}
-                                            </div>
-                                        }
-                                    }).collect::<Vec<_>>()}
+                    ">
+                        // ÁREA DE PREPARAÇÃO
+                        <Show
+                            when=move || !jogos_preparados.get().is_empty()
+                            fallback=|| () // <--- Aqui está a mágica: fallback limpo, sem into_any()
+                        >
+                            <div style="display: flex; justify-content: center; margin-bottom: 10px;">
+                                <div style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px; border: 1px dashed #ffeb3b; text-align: center;">
+                                    <h4 style="margin: 0 0 10px 0; color: #ffeb3b; font-size: 12px;">"Jogos a Baixar"</h4>
+                                    <div style="display: flex; gap: 10px;">
+                                        // Usamos um move || aqui dentro para iterar sobre os jogos reativamente
+                                        {move || jogos_preparados.get().into_iter().enumerate().map(|(idx, cartas)| {
+                                            view! {
+                                                <div on:click=move |_| acao_devolver(idx) style="cursor: pointer; display: flex; transform: scale(0.8);">
+                                                    {cartas.into_iter().map(|c| view! {
+                                                        <CardImage carta=c width="40px" theme=current_theme.get() />
+                                                    }).collect::<Vec<_>>()}
+                                                </div>
+                                            }
+                                        }).collect::<Vec<_>>()}
+                                    </div>
+                                    <button
+                                        on:click=acao_confirmar_baixa
+                                        style="margin-top: 5px; background: #2e7d32; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer;"
+                                    >
+                                        "Confirmar"
+                                    </button>
                                 </div>
-                                <button
-                                    on:click=acao_confirmar_baixa
-                                    style="margin-top: 5px; background: #2e7d32; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer;"
-                                >
-                                    "Confirmar"
-                                </button>
                             </div>
-                        </div>
                     </Show>
 
                     // CONTAINER FLEX: CONTROLES + MÃO

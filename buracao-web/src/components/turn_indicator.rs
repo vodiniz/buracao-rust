@@ -7,18 +7,19 @@ fn TurnDot(
     #[prop(into)] is_turn: Signal<bool>,
     rgb: (u8, u8, u8),
     #[prop(into)] label: Signal<String>,
+    #[prop(into)] count: Signal<usize>, // <--- NOVO: Recebe o número de cartas
 ) -> impl IntoView {
     let (r, g, b) = rgb;
 
     view! {
         <div
-            // O texto do tooltip (demora ~1s para aparecer no navegador)
+            // O tooltip continua mostrando o nome completo ao passar o mouse
             title=move || label.get()
             style=move || {
                 let turn = is_turn.get();
                 let me = is_me.get();
 
-                let alpha = if turn { 1.0 } else { 0.3 };
+                let alpha = if turn { 1.0 } else { 0.6 }; // Aumentei um pouco a opacidade base para ler o número
                 let bg_color = format!("rgba({}, {}, {}, {})", r, g, b, alpha);
 
                 let border = if me { "3px solid #ffeb3b" } else { "3px solid transparent" };
@@ -28,9 +29,10 @@ fn TurnDot(
 
                 let transform = if turn { "scale(1.25)" } else { "scale(1.0)" };
 
+                // CSS ATUALIZADO: Flexbox para centralizar e Fonte Charmosa
                 format!("
-                    width: 40px;  
-                    height: 40px; 
+                    width: 45px;  
+                    height: 45px; 
                     border-radius: 50%;
                     box-sizing: border-box;
                     background-color: {};
@@ -38,10 +40,24 @@ fn TurnDot(
                     box-shadow: {};
                     transform: {};
                     transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-                    cursor: pointer;
+                    cursor: help;
+                    
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    
+                    color: white;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    font-weight: bold;
+                    font-size: 1.1rem;
+                    text-shadow: 0px 1px 3px rgba(0,0,0,0.8);
+                    user-select: none;
                 ", bg_color, border, shadow, transform)
             }
-        ></div>
+        >
+            // Exibe o número no centro
+            {move || count.get()}
+        </div>
     }
 }
 
@@ -58,7 +74,7 @@ pub fn TurnIndicator(
     let green_rgb = (76, 175, 80); // #4caf50
     let red_rgb = (244, 67, 54); // #f44336
 
-    // Helper para criar o texto do label dinamicamente
+    // Helper para criar o texto do Tooltip (Nome + Cartas)
     let make_label = move |target_id: u32| {
         Signal::derive(move || {
             let all_names = names.get();
@@ -70,7 +86,18 @@ pub fn TurnIndicator(
                 .unwrap_or(format!("Jogador {}", target_id));
             let count = all_counts.get(target_id as usize).copied().unwrap_or(0);
 
-            format!("{}\n{} Cartas", name, count)
+            format!("{} ({} Cartas)", name, count)
+        })
+    };
+
+    // Helper para pegar APENAS o número de cartas (para o centro da bolinha)
+    let get_count = move |target_id: u32| {
+        Signal::derive(move || {
+            cards_count
+                .get()
+                .get(target_id as usize)
+                .copied()
+                .unwrap_or(0)
         })
     };
 
@@ -79,9 +106,9 @@ pub fn TurnIndicator(
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
             grid-template-rows: 1fr 1fr 1fr;
-            gap: 20px;    /* Aumentado o gap para espalhar as bolinhas */
-            width: 180px; /* Aumentado de 80px para 180px (Tamanho aproximado do Monte+Lixo) */
-            height: 180px;/* Aumentado de 80px para 180px (Para manter circular) */
+            gap: 20px;    
+            width: 180px; 
+            height: 180px;
             align-items: center;
             justify-items: center;
         ">
@@ -93,6 +120,7 @@ pub fn TurnIndicator(
                         is_turn=Signal::derive(move || current_turn.get() == 2)
                         rgb=blue_rgb
                         label=make_label(2)
+                        count=get_count(2) // Passando o count
                     />
                 }}
             </div>
@@ -105,6 +133,7 @@ pub fn TurnIndicator(
                         is_turn=Signal::derive(move || current_turn.get() == 3)
                         rgb=orange_rgb
                         label=make_label(3)
+                        count=get_count(3)
                     />
                 }}
             </div>
@@ -117,6 +146,7 @@ pub fn TurnIndicator(
                         is_turn=Signal::derive(move || current_turn.get() == 1)
                         rgb=green_rgb
                         label=make_label(1)
+                        count=get_count(1)
                     />
                 }}
             </div>
@@ -129,6 +159,7 @@ pub fn TurnIndicator(
                         is_turn=Signal::derive(move || current_turn.get() == 0)
                         rgb=red_rgb
                         label=make_label(0)
+                        count=get_count(0)
                     />
                 }}
             </div>
