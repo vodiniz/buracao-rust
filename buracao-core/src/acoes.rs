@@ -86,7 +86,9 @@ pub struct VisaoJogador {
 
     // 4. Placar e Status
     pub pontuacao_a: i32,
+    pub historico_pontos_a: Vec<i32>,
     pub pontuacao_b: i32,
+    pub historico_pontos_b: Vec<i32>,
     pub turno_atual: u32,
     pub rodada: u32,
 

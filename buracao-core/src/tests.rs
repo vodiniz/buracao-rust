@@ -23,7 +23,7 @@ pub fn gerar_jogo_teste_bateria() -> EstadoJogo {
 
     let mut maos = vec![Vec::new(); 4];
     let mut jogos_time_a = HashMap::new();
-    let mut jogos_time_b = HashMap::new();
+    let jogos_time_b = HashMap::new();
     let mut lixo = Vec::new();
 
     // --- CENÁRIO: MESA COM CANASTRAS REAIS ---
@@ -106,7 +106,9 @@ pub fn gerar_jogo_teste_bateria() -> EstadoJogo {
         jogos_time_a,
         jogos_time_b,
         pontuacao_a: 1000,
+        historico_pontos_a: vec![500, 500],
         pontuacao_b: 500,
+        historico_pontos_b: vec![800, -300],
         rodada: 10,
         numero_partida: 1,
         tres_vermelhos_time_a: Vec::new(),
