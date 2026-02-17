@@ -5,6 +5,7 @@ use crate::utils::mappers::{
 use buracao_core::acoes::DetalheJogo;
 use buracao_core::baralho::Carta;
 use leptos::prelude::*;
+use std::collections::HashSet; // Import necessário
 
 #[component]
 pub fn Table(
@@ -15,32 +16,27 @@ pub fn Table(
     #[prop(optional, into, default = "PaperCards".to_string())] theme: String,
     #[prop(optional, into, default = false)] is_my_team: bool,
     #[prop(into, default = "80px".to_string().into())] card_width: Signal<String>,
+    // --- NOVO: Recebe os IDs que devem brilhar ---
+    #[prop(into, default = Signal::derive(|| HashSet::new()))] highlighted_ids: Signal<
+        HashSet<u32>,
+    >,
 ) -> impl IntoView {
     let interativo = on_click.is_some();
 
-    // CORREÇÃO CRÍTICA: Armazenar Strings em StoredValue para permitir clones baratos
-    // dentro de múltiplos closures (Fn) sem consumir a variável original (FnOnce).
     let theme_store = StoredValue::new(theme);
     let titulo_store = StoredValue::new(titulo);
 
-    // Estilos calculados
-    let border_style = if is_my_team {
-        "2px solid #ffeb3b"
+    // Estilos calculados (Base do time)
+    let base_border = if is_my_team {
+        "2px solid rgba(255, 235, 59, 0.3)" // Amarelo fraco se for meu time
     } else {
         "1px solid rgba(255,255,255,0.1)"
-    };
-
-    let box_shadow = if is_my_team {
-        "0 0 15px rgba(255, 235, 59, 0.4)"
-    } else {
-        "none"
     };
 
     view! {
         <div style=format!("
             flex: 1; 
             border: {}; 
-            box-shadow: {};
             border-radius: 12px; 
             min-width: 300px; 
             background: rgba(0,0,0,0.15);
@@ -50,7 +46,7 @@ pub fn Table(
             max-height: 50vh; 
             overflow: hidden;
             transition: all 0.3s ease;
-        ", border_style, box_shadow)>
+        ", base_border)>
 
             // --- HEADER ---
             <h3 style="
@@ -58,7 +54,6 @@ pub fn Table(
                 text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.1);
                 background: rgba(0,0,0,0.2); text-align: center; flex-shrink: 0;
             ">
-                // Acessamos o valor guardado
                 {titulo_store.get_value()}
             </h3>
 
@@ -110,13 +105,28 @@ pub fn Table(
 
                                 let total_cartas = cartas_visuais.len();
                                 let cb_local = on_click;
-                                let width_local = card_width; // Signal é Copy
+                                let width_local = card_width;
+                                let theme_local = theme_store.get_value();
+
+                                // --- LÓGICA DO DESTAQUE ---
+                                let jogo_id = jogo.id;
+                                let highlight_style = move || {
+                                    let highlighted = highlighted_ids.get().contains(&jogo_id);
+                                    if highlighted {
+                                        // BORDA AMARELA BRILHANTE + PULSAÇÃO
+                                        "border: 3px solid #ffeb3b; box-shadow: 0 0 20px #ffeb3b; transform: scale(1.02);"
+                                    } else {
+                                        // Estilo padrão do jogo
+                                        "border: 1px solid rgba(255,255,255,0.05); box-shadow: none; transform: scale(1.0);"
+                                    }
+                                };
 
                                 view! {
                                     <div
                                         on:click=move |_| { if let Some(cb) = cb_local { cb.run(idx); } }
                                         style=move || {
                                             let cursor = if interativo { "pointer" } else { "default" };
+                                            // Combinamos o estilo base com o estilo dinâmico de highlight
                                             format!("
                                                 background: rgba(0,0,0,0.2); 
                                                 padding: 8px; 
@@ -124,10 +134,10 @@ pub fn Table(
                                                 display: inline-flex; 
                                                 align-items: center; 
                                                 cursor: {}; 
-                                                transition: all 0.2s;
-                                                border: 1px solid rgba(255,255,255,0.05); 
+                                                transition: all 0.3s ease-out; /* Transição suave */
                                                 min-height: 90px;
-                                            ", cursor)
+                                                {} 
+                                            ", cursor, highlight_style())
                                         }
                                     >
                                         {cartas_visuais.into_iter().enumerate().map(|(c_idx, c)| {
@@ -135,9 +145,9 @@ pub fn Table(
                                             let eh_escura = index_escuro == Some(c_idx);
                                             let eh_ultima = c_idx == total_cartas - 1;
 
-                                            // CLONE LIMPO: Pegamos do Store a cada iteração
-                                            let theme_local = theme_store.get_value();
+                                            // Re-bind para clone barato no closure
                                             let w_card = width_local;
+                                            let t_local = theme_local.clone();
 
                                             view! {
                                                 <div
@@ -155,7 +165,7 @@ pub fn Table(
                                                         id=carta_para_asset(&c)
                                                         width=w_card
                                                         selection_group=Signal::derive(|| Option::<usize>::None)
-                                                        theme=theme_local
+                                                        theme=t_local
                                                     />
                                                 </div>
                                             }
@@ -168,18 +178,14 @@ pub fn Table(
                 </div>
             </div>
 
-            // --- FOOTER (Três Vermelhos) ---
-            <Show
-                when=move || !tres_vermelhos.get().is_empty()
-                fallback=|| ()
-            >
+            // --- FOOTER (Igual ao seu original) ---
+            <Show when=move || !tres_vermelhos.get().is_empty() fallback=|| ()>
                 <div style="padding: 5px 10px; background: rgba(0,0,0,0.3); border-top: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; min-height: 40px;">
                     <div style="display: flex; gap: 5px;">
                         <For
                             each=move || tres_vermelhos.get()
                             key=|c| format!("{}{}", c.valor, c.naipe)
                             children=move |c| {
-                                // CLONE LIMPO: Pegamos do Store
                                 let theme_local = theme_store.get_value();
                                 view! {
                                     <Card
