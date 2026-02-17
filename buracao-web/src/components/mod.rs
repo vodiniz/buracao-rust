@@ -7,5 +7,6 @@ pub mod notification;
 pub mod opponents;
 pub mod scoreboard;
 pub mod settings;
+pub mod shortcut_manager;
 pub mod table;
 pub mod turn_indicator;
