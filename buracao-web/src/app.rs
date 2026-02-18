@@ -10,6 +10,7 @@ use crate::game::state::GameState;
 use crate::components::board::Board;
 use crate::components::controls::GameControls;
 use crate::components::hand::Hand;
+use crate::components::log::GameLog;
 use crate::components::login::LoginScreen;
 use crate::components::notification::NotificationToast;
 use crate::components::scoreboard::{ScoreHistoryModal, Scoreboard};
@@ -292,6 +293,11 @@ pub fn App() -> impl IntoView {
                     </Show>
 
                     <div style="display: flex; align-items: flex-end; gap: 20px; width: 100%; overflow: hidden; padding: 0 20px;">
+
+                        // --- GAME LOG (Esquerda) ---
+                        <div style="flex-shrink: 0; margin-bottom: 20px;">
+                             <GameLog log=state.game_log height="180px" />
+                        </div>
                         // Botões de Ação
                         <div style="flex-shrink: 0; margin-bottom: 20px;">
                             <GameControls

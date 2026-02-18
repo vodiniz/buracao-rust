@@ -151,6 +151,7 @@ dependencies = [
  "getrandom",
  "gloo-net",
  "gloo-timers",
+ "js-sys",
  "leptos",
  "leptos_meta",
  "leptos_router",

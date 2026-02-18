@@ -9,6 +9,14 @@ use buracao_core::baralho::Carta;
 use crate::components::notification::Toast;
 use crate::components::shortcut_manager::KeyBindings;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct LogEntry {
+    pub time: String,
+    pub msg: String,
+    pub is_error: bool,   // Útil para estilizar erros em vermelho
+    pub is_success: bool, // Útil para vitórias/destaques
+}
+
 #[derive(Clone, Copy)]
 pub struct GameState {
     // --- ESTADO DO JOGO (Vindo do Servidor) ---
@@ -40,6 +48,7 @@ pub struct GameState {
     pub highlighted_games: RwSignal<HashSet<u32>>,
     pub toasts: RwSignal<Vec<Toast>>,
     pub next_toast_id: RwSignal<usize>, // Substituindo StoredValue para uniformidade
+    pub game_log: RwSignal<Vec<LogEntry>>,
     pub in_game: RwSignal<bool>,
     pub player_name: RwSignal<String>,
     pub room_code: RwSignal<String>,
@@ -120,6 +129,7 @@ impl GameState {
             highlighted_games: RwSignal::new(HashSet::new()),
             toasts: RwSignal::new(Vec::new()),
             next_toast_id: RwSignal::new(0),
+            game_log: RwSignal::new(Vec::new()),
             in_game: RwSignal::new(false),
             player_name: RwSignal::new(String::new()),
             room_code: RwSignal::new(String::new()),

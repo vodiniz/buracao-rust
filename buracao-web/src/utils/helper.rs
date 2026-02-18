@@ -1,4 +1,5 @@
 use buracao_core::baralho::Carta;
+
 // Retorna a posição relativa na tela ("bottom", "right", "top", "left")
 pub fn get_relative_position(my_id: u32, target_id: u32) -> &'static str {
     // Supondo 4 jogadores. A matemática modular resolve a rotação.
@@ -33,4 +34,12 @@ pub fn reconciliar_mao(mao_local: &[Carta], mao_servidor: Vec<Carta>) -> Vec<Car
     nova_mao.extend(pendencias_do_servidor);
 
     nova_mao
+}
+
+pub fn get_current_time() -> String {
+    let date = js_sys::Date::new_0();
+    let hours = date.get_hours();
+    let minutes = date.get_minutes();
+    let seconds = date.get_seconds();
+    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
 }

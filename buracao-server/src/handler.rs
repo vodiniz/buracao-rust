@@ -65,8 +65,6 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
             room_ref = existing_room.clone();
         } else {
             println!("🏠 Criando SALA NOVA: {}", login_data.sala);
-            // IMPORTANTE: Room::new() já chama EstadoJogo::new() que gerencia a criação correta (Teste ou Padrão)
-            // Não chamamos mais dar_cartas() aqui manualmente.
             let r = Room::new();
             let new_room = Arc::new(RwLock::new(r));
 
@@ -133,23 +131,51 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
             Err(_) => continue,
         };
 
+        // --- CLONE PARA O LOG ---
+        // Precisamos clonar porque 'realizar_acao' consome 'acao'
+        let acao_para_log = acao.clone();
+
         let mut room = room_ref.write().await;
         let resultado = room.game_state.realizar_acao(my_player_id, acao);
 
         match resultado {
-            Ok(msg_sucesso) => {
-                // 1. Broadcast do Estado ATUAL (Mostra a batida na mesa)
+            Ok(_msg_sucesso) => {
+                // --- 1. IDENTIFICA O NOME ---
+                let nome_jogador = room
+                    .player_names
+                    .get(&my_player_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("Jogador {}", my_player_id));
+
+                // --- 2. GERA TEXTO DESCRITIVO ---
+                // Transforma a ação técnica em texto legível para o Log
+                let texto_log = match &acao_para_log {
+                    AcaoJogador::ComprarBaralho => format!("{} comprou do monte.", nome_jogador),
+                    AcaoJogador::ComprarLixo { .. } => format!("{} pegou o lixo!", nome_jogador),
+                    AcaoJogador::BaixarJogos { jogos } => {
+                        format!("{} baixou {} novos jogos.", nome_jogador, jogos.len())
+                    }
+                    AcaoJogador::Ajuntar { .. } => format!("{} ajuntou cartas.", nome_jogador),
+                    AcaoJogador::Descartar { .. } => format!("{} descartou.", nome_jogador),
+                    AcaoJogador::Mensagem { texto } => format!("{}: {}", nome_jogador, texto),
+                };
+
+                // --- 3. BROADCAST DO LOG (NOTIFICAÇÃO) ---
+                // Envia para TODOS os clientes na sala
+                if let Ok(json_notif) = serde_json::to_string(&MsgServidor::Notificacao(texto_log))
+                {
+                    for client_tx in room.clients.values() {
+                        let _ = client_tx.send(Message::text(json_notif.clone()));
+                    }
+                }
+
+                // --- 4. BROADCAST DO ESTADO (VISUAL) ---
                 for (pid, client_tx) in room.clients.iter() {
                     let visao = room.game_state.gerar_visao_para_jogador(*pid);
                     let envelope = MsgServidor::Estado(visao);
                     if let Ok(json) = serde_json::to_string(&envelope) {
                         let _ = client_tx.send(Message::text(json));
                     }
-                }
-
-                // 2. Notificação de sucesso para quem jogou
-                if let Ok(json) = serde_json::to_string(&MsgServidor::Notificacao(msg_sucesso)) {
-                    let _ = tx.send(Message::text(json));
                 }
 
                 // --- LÓGICA DO TIMER DE 15 SEGUNDOS (BATIDA) ---
@@ -162,19 +188,15 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
 
                     println!("🏆 {} BATEU! Iniciando contagem...", nome_vencedor);
 
-                    // Clona referência para a Task
                     let room_clone_timer = room_ref.clone();
 
-                    // Dispara Task independente (não bloqueia o loop)
                     tokio::spawn(async move {
-                        // Aviso Inicial
                         broadcast_msg(
                             &room_clone_timer,
                             format!("🏆 {} BATEU! Reiniciando em 15s...", nome_vencedor),
                         )
                         .await;
 
-                        // Contagem Regressiva
                         for i in (1..=15).rev() {
                             broadcast_msg(
                                 &room_clone_timer,
@@ -185,16 +207,12 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
                             tokio::time::sleep(Duration::from_secs(1)).await;
                         }
 
-                        // Reset Final
                         broadcast_msg(&room_clone_timer, "🔄 REINICIANDO AGORA!".to_string()).await;
 
                         {
                             let mut r = room_clone_timer.write().await;
-
-                            // AQUI acontece a mágica: chama o reset (que verifica MODO_TESTE se configurado)
                             r.game_state.resetar_jogo();
 
-                            // Manda as cartas novas para todos
                             for (pid, client_tx) in r.clients.iter() {
                                 let visao = r.game_state.gerar_visao_para_jogador(*pid);
                                 let envelope = MsgServidor::Estado(visao);
@@ -207,6 +225,7 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
                 }
             }
             Err(erro) => {
+                // Erro vai apenas para quem tentou jogar
                 if let Ok(json) = serde_json::to_string(&MsgServidor::Erro(erro)) {
                     let _ = tx.send(Message::text(json));
                 }
@@ -223,7 +242,6 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
 // Helper seguro para Broadcast
 async fn broadcast_msg(room_ref: &Arc<RwLock<Room>>, texto: String) {
     let room = room_ref.read().await;
-    // Usamos if let Ok para evitar unwrap() em produção
     if let Ok(json_msg) = serde_json::to_string(&MsgServidor::Notificacao(texto)) {
         for client_tx in room.clients.values() {
             let _ = client_tx.send(Message::text(json_msg.clone()));

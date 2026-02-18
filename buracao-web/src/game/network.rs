@@ -1,6 +1,6 @@
-use super::state::GameState;
+use super::state::{GameState, LogEntry};
 use crate::components::notification::{Toast, ToastType};
-use crate::utils::helper::reconciliar_mao;
+use crate::utils::helper::{get_current_time, reconciliar_mao};
 use crate::utils::mappers::verso_para_asset;
 use buracao_core::acoes::{DetalheJogo, MsgServidor};
 
@@ -201,6 +201,15 @@ fn processar_mensagem(state: GameState, msg: MsgServidor) {
             if turno_novo == sou_eu && turno_antigo != sou_eu {
                 tocar_som(state, true); // true = som de turno
                 add_toast(state, "Sua vez de jogar!".to_string(), ToastType::Info);
+
+                state.game_log.update(|log| {
+                    log.push(LogEntry {
+                        time: get_current_time(),
+                        msg: "--- SUA VEZ ---".to_string(),
+                        is_error: false,
+                        is_success: true, // Usa cor de destaque
+                    });
+                });
             }
 
             state.status_jogo.set(format!("Rodada {}", visao.rodada));
@@ -233,9 +242,29 @@ fn processar_mensagem(state: GameState, msg: MsgServidor) {
                 });
                 state.jogos_preparados.set(Vec::new());
             }
+
+            state.game_log.update(|log| {
+                log.push(LogEntry {
+                    time: get_current_time(),
+                    msg: format!("ERRO: {}", e),
+                    is_error: true,
+                    is_success: false, // Usa cor de destaque
+                });
+            });
         }
         MsgServidor::Notificacao(n) => {
-            add_toast(state, n, ToastType::Info);
+            add_toast(state, n.clone(), ToastType::Info);
+            state.game_log.update(|log| {
+                log.push(LogEntry {
+                    time: get_current_time(),
+                    msg: n.clone(),
+                    is_error: false,
+                    is_success: n.contains("bateu") || n.contains("Vencedor"), // Pinta de dourado se for vitória
+                });
+                if log.len() > 50 {
+                    log.remove(0);
+                }
+            });
         }
         MsgServidor::FimDeJogo { vencedor_time, .. } => {
             state
