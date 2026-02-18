@@ -1,6 +1,6 @@
-use super::state::{GameState, LogEntry};
+use super::state::{CartaIdentificada, GameState, LogEntry};
 use crate::components::notification::{Toast, ToastType};
-use crate::utils::helper::{get_current_time, reconciliar_mao};
+use crate::utils::helper::get_current_time;
 use crate::utils::mappers::verso_para_asset;
 use buracao_core::acoes::{DetalheJogo, MsgServidor};
 
@@ -104,6 +104,39 @@ pub fn setup_websocket(
     Some(tx)
 }
 
+// --- LÓGICA DE RECONCILIAÇÃO INTELIGENTE ---
+// Compara a mão atual com a nova do servidor. Se a carta já existe, mantém o ID antigo.
+// Isso impede que o Leptos destrua e recrie o elemento DOM, mantendo a animação fluida.
+fn atualizar_mao_preservando_ids(
+    state: GameState,
+    nova_mao_server: Vec<buracao_core::baralho::Carta>,
+) -> Vec<CartaIdentificada> {
+    let mao_atual = state.minha_mao.get_untracked();
+    let mut nova_mao_identificada = Vec::new();
+
+    // Pool de cartas existentes para tentar reutilizar IDs
+    let mut pool: Vec<CartaIdentificada> = mao_atual;
+
+    for carta_server in nova_mao_server {
+        // Verifica se já temos essa carta na mão local (comparação por valor/naipe)
+        if let Some(idx) = pool.iter().position(|c| c.carta == carta_server) {
+            // Achou! Remove do pool para evitar duplicatas e reusa o objeto com ID antigo
+            nova_mao_identificada.push(pool.remove(idx));
+        } else {
+            // Carta nova (ex: acabou de comprar): Gera um ID visual novo
+            let novo_id = state.unique_card_counter.get_untracked() + 1;
+            state.unique_card_counter.set(novo_id);
+
+            nova_mao_identificada.push(CartaIdentificada {
+                id: novo_id,
+                carta: carta_server,
+            });
+        }
+    }
+
+    nova_mao_identificada
+}
+
 /// Processa a mensagem recebida e atualiza os sinais do GameState
 fn processar_mensagem(state: GameState, msg: MsgServidor) {
     match msg {
@@ -112,7 +145,7 @@ fn processar_mensagem(state: GameState, msg: MsgServidor) {
         }
         MsgServidor::Estado(visao) => {
             // A. Limpa seleção para evitar bugs visuais (índices inválidos)
-            state.selected_indices.update(|s| s.clear());
+            state.selected_ids.update(|s| s.clear());
 
             // B. Som de Compra (Se qtd monte diminuiu)
             let monte_antigo = state.qtd_monte.get_untracked();
@@ -171,10 +204,9 @@ fn processar_mensagem(state: GameState, msg: MsgServidor) {
                 );
             }
 
-            // D. Atualização dos Dados Principais
-            state.minha_mao.update(|mao_atual| {
-                *mao_atual = reconciliar_mao(mao_atual, visao.minha_mao);
-            });
+            // D. Atualização dos Dados Principais (COM PRESERVAÇÃO DE IDs)
+            let nova_mao = atualizar_mao_preservando_ids(state, visao.minha_mao);
+            state.minha_mao.set(nova_mao);
 
             state.lixo_topo.set(visao.lixo);
             state.meu_id.set(visao.meu_id);
@@ -229,16 +261,28 @@ fn processar_mensagem(state: GameState, msg: MsgServidor) {
             add_toast(state, format!("ERRO: {}", e), ToastType::Error);
 
             // Limpa seleção
-            state.selected_indices.update(|s| s.clear());
+            state.selected_ids.update(|s| s.clear());
 
             // Recuperação Otimista: Devolve cartas preparadas para a mão se falhou
+            // Gera novos IDs para garantir unicidade
             let jogos_pendentes = state.jogos_preparados.get_untracked();
             if !jogos_pendentes.is_empty() {
                 state.minha_mao.update(|mao| {
+                    let mut current_id = state.unique_card_counter.get_untracked();
                     for jogo in jogos_pendentes {
-                        mao.extend(jogo);
+                        for carta in jogo {
+                            current_id += 1;
+                            mao.push(CartaIdentificada {
+                                id: current_id,
+                                carta,
+                            });
+                        }
                     }
-                    mao.sort();
+                    // Atualiza o contador global
+                    state.unique_card_counter.set(current_id);
+
+                    // Ordenação opcional (se quiser manter organizado após erro)
+                    // mao.sort_by(|a, b| a.carta.cmp(&b.carta));
                 });
                 state.jogos_preparados.set(Vec::new());
             }
@@ -270,7 +314,7 @@ fn processar_mensagem(state: GameState, msg: MsgServidor) {
             state
                 .status_jogo
                 .set(format!("Vencedor: Time {}", vencedor_time));
-            state.selected_indices.update(|s| s.clear());
+            state.selected_ids.update(|s| s.clear());
         }
     }
 }

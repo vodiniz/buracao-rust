@@ -17,11 +17,18 @@ pub struct LogEntry {
     pub is_success: bool, // Útil para vitórias/destaques
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CartaIdentificada {
+    pub id: u32,      // ID único visual (frontend)
+    pub carta: Carta, // Dados reais (backend)
+}
+
 #[derive(Clone, Copy)]
 pub struct GameState {
     // --- ESTADO DO JOGO (Vindo do Servidor) ---
     pub turno_atual_id: RwSignal<u32>,
-    pub minha_mao: RwSignal<Vec<Carta>>,
+    pub minha_mao: RwSignal<Vec<CartaIdentificada>>,
+    pub unique_card_counter: RwSignal<u32>,
     pub lixo_topo: RwSignal<Option<Carta>>,
     pub jogos_preparados: RwSignal<Vec<Vec<Carta>>>,
     pub ajuntes_lixo_preparados: RwSignal<Vec<(u32, Vec<Carta>)>>,
@@ -44,8 +51,9 @@ pub struct GameState {
 
     // --- ESTADO LOCAL (Interface) ---
     pub lixo_selecionado: RwSignal<bool>,
-    pub selected_indices: RwSignal<HashSet<usize>>,
+    pub selected_ids: RwSignal<HashSet<u32>>,
     pub highlighted_games: RwSignal<HashSet<u32>>,
+    pub trigger_shake: RwSignal<usize>,
     pub toasts: RwSignal<Vec<Toast>>,
     pub next_toast_id: RwSignal<usize>, // Substituindo StoredValue para uniformidade
     pub game_log: RwSignal<Vec<LogEntry>>,
@@ -103,6 +111,7 @@ impl GameState {
             // Jogo
             turno_atual_id: RwSignal::new(0),
             minha_mao: RwSignal::new(Vec::new()),
+            unique_card_counter: RwSignal::new(0),
             lixo_topo: RwSignal::new(None),
             jogos_preparados: RwSignal::new(Vec::new()),
             ajuntes_lixo_preparados: RwSignal::new(Vec::new()),
@@ -125,8 +134,9 @@ impl GameState {
 
             // Local
             lixo_selecionado: RwSignal::new(false),
-            selected_indices: RwSignal::new(HashSet::new()),
+            selected_ids: RwSignal::new(HashSet::new()),
             highlighted_games: RwSignal::new(HashSet::new()),
+            trigger_shake: RwSignal::new(0),
             toasts: RwSignal::new(Vec::new()),
             next_toast_id: RwSignal::new(0),
             game_log: RwSignal::new(Vec::new()),

@@ -1,7 +1,7 @@
 use leptos::prelude::window;
 use leptos::prelude::*;
 
-// Módulos do Jogo (Refatorados)
+// Módulos do Jogo
 use crate::game::actions::GameActions;
 use crate::game::network::setup_websocket;
 use crate::game::state::GameState;
@@ -26,8 +26,6 @@ use crate::utils::mappers::carta_para_asset;
 // Core
 use buracao_core::baralho::Carta;
 
-// --- COMPONENTES AUXILIARES LOCAIS ---
-
 #[component]
 fn CardImage(
     carta: Carta,
@@ -39,7 +37,6 @@ fn CardImage(
     view! { <img src=src style=format!("width: {}; height: auto;", width) /> }
 }
 
-// --- HELPER DE DEVICE ID ---
 fn get_or_create_device_id() -> String {
     let window = web_sys::window().expect("no global `window` exists");
     let storage = window
@@ -57,16 +54,11 @@ fn get_or_create_device_id() -> String {
     }
 }
 
-// --- COMPONENTE PRINCIPAL ---
-
 #[component]
 pub fn App() -> impl IntoView {
-    // 1. INICIALIZAÇÃO DO ESTADO GLOBAL
     let state = GameState::new();
     let device_id = get_or_create_device_id();
 
-    // 2. CONFIGURAÇÃO DE REDE (WEBSOCKET)
-    // Monitora 'in_game'. Se virar true, conecta.
     Effect::new(move |_| {
         if state.in_game.get() {
             let tx = setup_websocket(state, device_id.clone());
@@ -74,12 +66,7 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // 3. HELPER DE AÇÕES
-    // Cria uma instância de GameActions com o sender atual.
-    // Usamos um closure para sempre pegar o sender mais recente.
     let actions = move || GameActions::new(state, state.ws_sender.get());
-
-    // 4. CALLBACKS DA UI
 
     let ao_entrar = Callback::new(move |(nome, sala)| {
         state.player_name.set(nome);
@@ -100,7 +87,6 @@ pub fn App() -> impl IntoView {
         let _ = window.location().reload();
     };
 
-    // Cálculos de estilo
     let hand_card_width =
         Signal::derive(move || format!("{}px", (100.0 * state.card_scale.get()) as i32));
     let board_width =
@@ -110,12 +96,25 @@ pub fn App() -> impl IntoView {
 
     let e_minha_vez = move || state.sou_o_jogador_da_vez.get();
 
-    // --- RENDERIZAÇÃO ---
     view! {
         <Show when=move || state.in_game.get() fallback=move || view! { <LoginScreen on_enter=ao_entrar /> }>
             <div style=move || {
-                let bg = if e_minha_vez() { "#388e3c" } else { "#1b5e20" };
-                format!("background-color: {}; height: 100vh; display: flex; flex-direction: column; font-family: sans-serif; color: white; overflow: hidden; transition: background-color 0.5s;", bg)
+                // MUDANÇA VISUAL: MESA DE FELTRO
+                // Usamos radial-gradient para simular iluminação de mesa de poker.
+                // Se for minha vez, o centro fica mais "aceso" (#43a047) vs normal (#2e7d32).
+                // As bordas são sempre escuras (#1b5e20) para dar foco no centro.
+                let center_color = if e_minha_vez() { "#43a047" } else { "#2e7d32" };
+
+                format!("
+                    background: radial-gradient(circle at center, {} 0%, #1b5e20 85%, #0d3310 100%);
+                    height: 100vh; 
+                    display: flex; 
+                    flex-direction: column; 
+                    font-family: 'Segoe UI', sans-serif; 
+                    color: white; 
+                    overflow: hidden; 
+                    transition: background 0.8s ease; /* Transição suave da luz */
+                ", center_color)
             }>
 
                 // === HEADER ===
@@ -126,7 +125,7 @@ pub fn App() -> impl IntoView {
                             <small style="opacity: 0.8; font-size: 0.85rem;">
                                 {move || {
                                     let id = state.meu_id.get();
-                                    let time = if id.is_multiple_of(2) { "Time A" } else { "Time B" };
+                                    let time = if id % 2 == 0 { "Time A" } else { "Time B" };
                                     format!("Meu ID: {} ({})", id, time)
                                 }}
                             </small>
@@ -203,14 +202,12 @@ pub fn App() -> impl IntoView {
                     card_scale=state.card_scale
                     volume=state.volume
                     key_bindings=state.key_bindings
-
                 />
 
                 // === ÁREA CENTRAL (Mesas e Board) ===
                 <div style="flex: 1; display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; padding: 20px; gap: 20px; overflow-y: auto;">
-                    // Mesa Esquerda (Time A se eu for par, B se eu for ímpar)
                     {move || {
-                        let sou_time_a = state.meu_id.get().is_multiple_of(2);
+                        let sou_time_a = state.meu_id.get() % 2 == 0;
                         let cb = if sou_time_a { Some(Callback::new(move |idx| actions().ajuntar(idx))) } else { None };
                         let titulo = if sou_time_a { "MEU TIME" } else { "TIME INIMIGO" };
                         view! {
@@ -227,7 +224,6 @@ pub fn App() -> impl IntoView {
                         }
                     }}
 
-                    // Centro (Lixo, Monte e Turnos)
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 20px; flex-shrink: 0; margin-top: 40px;">
                         <Board
                             lixo=state.lixo_topo
@@ -250,9 +246,8 @@ pub fn App() -> impl IntoView {
                         </div>
                     </div>
 
-                    // Mesa Direita
                     {move || {
-                        let sou_time_b = !state.meu_id.get().is_multiple_of(2);
+                        let sou_time_b = state.meu_id.get() % 2 != 0;
                         let cb = if sou_time_b { Some(Callback::new(move |idx| actions().ajuntar(idx))) } else { None };
                         let titulo = if sou_time_b { "MEU TIME" } else { "TIME INIMIGO" };
                         view! {
@@ -312,16 +307,19 @@ pub fn App() -> impl IntoView {
                             />
                         </div>
 
-                        // Mão do Jogador
+                        // --- MÃO DO JOGADOR (CORRIGIDO) ---
                         <div style="flex-grow: 1; min-width: 0;">
                             {move || {
-                                let _mao = state.minha_mao.get(); // Trigger de update
+                                // MANTEMOS este bloco move || para reagir a Mudanças de Tema/Escala
+                                // MAS REMOVEMOS a leitura de state.minha_mao.get() aqui.
+                                // A mão é passada como SINAL, então o componente Hand se vira.
                                 view! {
                                     <Hand
                                         cartas=state.minha_mao
                                         card_width=hand_card_width
                                         theme=state.current_theme.get()
-                                        selected_indices=state.selected_indices
+                                        selected_ids=state.selected_ids
+                                        shake_trigger=state.trigger_shake
                                     />
                                 }
                             }}
@@ -329,7 +327,6 @@ pub fn App() -> impl IntoView {
                     </div>
                 </div>
 
-                // === ELEMENTOS INVISÍVEIS (Audio, Toast) ===
                 <NotificationToast toasts=state.toasts />
                 <audio node_ref=state.my_turn_audio_ref src="/assets/audio/my_turn_xylophone.wav" style="display: none;" />
                 <audio node_ref=state.draw_audio_ref src="/assets/audio/draw1.ogg" style="display: none;" prop:preload="auto" />
