@@ -4,7 +4,7 @@ use leptos::prelude::*;
 // Isso torna as pastas components, utils e state acessíveis em todo o projeto
 pub mod app;
 pub mod components;
-pub mod state; // Se ainda não criou os arquivos dentro de state, comente essa linha
+pub mod game;
 pub mod utils;
 
 // Importando o componente principal

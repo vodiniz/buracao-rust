@@ -922,6 +922,7 @@ impl EstadoJogo {
         self.maos.clear();
 
         self.baralho = Baralho::new();
+        self.numero_partida += 1;
         self.turno_atual = self.numero_partida % 4;
 
         self.dar_cartas();

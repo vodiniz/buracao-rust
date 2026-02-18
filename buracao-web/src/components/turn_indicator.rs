@@ -64,8 +64,8 @@ fn TurnDot(
 pub fn TurnIndicator(
     #[prop(into)] my_id: Signal<u32>,
     #[prop(into)] current_turn: Signal<u32>,
-    names: ReadSignal<HashMap<u32, String>>,
-    cards_count: ReadSignal<Vec<usize>>,
+    #[prop(into)] names: Signal<HashMap<u32, String>>, // <--- Mude para Signal e adicione #[prop(into)]
+    #[prop(into)] cards_count: Signal<Vec<usize>>,
 ) -> impl IntoView {
     // Cores Base em RGB
     let blue_rgb = (41, 182, 246); // #29b6f6

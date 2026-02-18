@@ -6,19 +6,21 @@ use wasm_bindgen::JsCast;
 pub struct KeyBindings {
     pub comprar_monte: String,
     pub descartar: String,
-    pub comprar_lixo: String, // Adicionei para completude (ex: 'T' de Trash ou 'X')
+    pub comprar_lixo: String,
     pub organizar: String,
     pub placar: String,
+    pub separar: String, // <--- NOVO CAMPO
 }
 
 impl Default for KeyBindings {
     fn default() -> Self {
         Self {
             comprar_monte: "c".to_string(),
-            descartar: "l".to_string(), // "L" conforme seu pedido
+            descartar: "l".to_string(),
             comprar_lixo: "x".to_string(),
             organizar: "o".to_string(),
             placar: "p".to_string(),
+            separar: "s".to_string(), // <--- VALOR PADRÃO
         }
     }
 }
@@ -30,13 +32,17 @@ pub fn ShortcutManager(
     #[prop(into)] on_discard: Callback<()>,
     #[prop(into)] on_buy_trash: Callback<()>,
     #[prop(into)] on_sort: Callback<()>,
+    #[prop(into)] on_separate: Callback<()>, // <--- NOVA PROP (CALLBACK)
     #[prop(into)] on_toggle_scoreboard: Callback<()>,
 ) -> impl IntoView {
     let handle_keydown = move |ev: web_sys::KeyboardEvent| {
-        let key = ev.key().to_lowercase();
-        let binds = bindings.get();
+        let binds = match bindings.try_get() {
+            Some(b) => b,
+            None => return,
+        };
 
-        // 1. Ignorar se o usuário estiver digitando em um input
+        let key = ev.key().to_lowercase();
+
         if let Some(target) = ev.target() {
             if let Some(el) = target.dyn_ref::<web_sys::HtmlElement>() {
                 let tag = el.tag_name().to_lowercase();
@@ -46,20 +52,21 @@ pub fn ShortcutManager(
             }
         }
 
-        // 2. Mapeamento
-        if key == binds.comprar_monte {
+        if key == binds.comprar_monte.to_lowercase() {
             on_buy_deck.run(());
-        } else if key == binds.descartar {
+        } else if key == binds.descartar.to_lowercase() {
             on_discard.run(());
-        } else if key == binds.comprar_lixo {
+        } else if key == binds.comprar_lixo.to_lowercase() {
             on_buy_trash.run(());
-        } else if key == binds.organizar {
+        } else if key == binds.organizar.to_lowercase() {
             on_sort.run(());
-        } else if key == binds.placar {
+        } else if key == binds.separar.to_lowercase() {
+            // <--- LÓGICA DO NOVO ATALHO
+            on_separate.run(());
+        } else if key == binds.placar.to_lowercase() {
             on_toggle_scoreboard.run(());
         }
     };
 
-    // Registra o listener na janela global
     window_event_listener(ev::keydown, handle_keydown);
 }

@@ -5,21 +5,22 @@ use std::collections::HashMap;
 pub fn Scoreboard(
     #[prop(into)] pontuacao_a: Signal<i32>,
     #[prop(into)] pontuacao_b: Signal<i32>,
+    // --- NOVOS CAMPOS QUE FALTAVAM ---
+    #[prop(into)] historico_a: Signal<Vec<i32>>,
+    #[prop(into)] historico_b: Signal<Vec<i32>>,
+    #[prop(into)] nomes: Signal<HashMap<u32, String>>,
+    // ---------------------------------
     #[prop(into)] my_id: Signal<u32>,
-    // NOVO: Callback para avisar o App que foi clicado
     #[prop(into)] on_click_expand: Callback<()>,
 ) -> impl IntoView {
     let (is_pressed, set_pressed) = signal(false);
 
     view! {
         <div
-            // AQUI: Ao clicar, chama a função do pai
             on:click=move |_| on_click_expand.run(())
-
             on:mousedown=move |_| set_pressed.set(true)
             on:mouseup=move |_| set_pressed.set(false)
             on:mouseleave=move |_| set_pressed.set(false)
-
             style=move || format!("
                 cursor: pointer;
                 display: flex;
@@ -36,7 +37,6 @@ pub fn Scoreboard(
                 transform: scale({});
                 user-select: none;
             ", if is_pressed.get() { "0.95" } else { "1.0" })
-
             title="Clique ou pressione 'P' para ver o histórico"
         >
             <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: #aaa; margin-bottom: 8px; text-align: center; font-weight: bold;">
@@ -47,16 +47,11 @@ pub fn Scoreboard(
                 let id = my_id.get();
                 let p_a = pontuacao_a.get();
                 let p_b = pontuacao_b.get();
-
-                let sou_time_a = id % 2 == 0;
+                let sou_time_a = id.is_multiple_of(2);
                 let cor_meu = "#90caf9";
                 let cor_inimigo = "#ffcc80";
 
-                let (pontos_meu, pontos_inimigo) = if sou_time_a {
-                    (p_a, p_b)
-                } else {
-                    (p_b, p_a)
-                };
+                let (pontos_meu, pontos_inimigo) = if sou_time_a { (p_a, p_b) } else { (p_b, p_a) };
 
                 view! {
                     <>
@@ -64,7 +59,6 @@ pub fn Scoreboard(
                             <span style=format!("color: {}; font-weight: bold; font-size: 11px;", cor_meu)>"MEU TIME"</span>
                             <span style="font-size: 18px; font-weight: bold;">{pontos_meu}</span>
                         </div>
-
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span style=format!("color: {}; font-weight: bold; font-size: 11px;", cor_inimigo)>"INIMIGO"</span>
                             <span style="font-size: 18px; font-weight: bold;">{pontos_inimigo}</span>
@@ -73,7 +67,6 @@ pub fn Scoreboard(
                 }
             }}
         </div>
-        // REMOVIDO: O <Show><ScoreHistoryModal ... /></Show> sai daqui e vai para o App.rs
     }
 }
 
@@ -94,7 +87,7 @@ pub fn ScoreHistoryModal(
     // Se precisar do código do modal novamente, me avise.
 
     let (hover_btn, set_hover_btn) = signal(false);
-    let sou_time_a = move || my_id.get() % 2 == 0;
+    let sou_time_a = move || my_id.get().is_multiple_of(2);
 
     // Helper de nomes (igual ao anterior)
     let get_names_for_team = move |is_team_a: bool| {
