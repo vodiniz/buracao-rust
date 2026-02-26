@@ -104,37 +104,49 @@ pub fn setup_websocket(
     Some(tx)
 }
 
-// --- LÓGICA DE RECONCILIAÇÃO INTELIGENTE ---
-// Compara a mão atual com a nova do servidor. Se a carta já existe, mantém o ID antigo.
-// Isso impede que o Leptos destrua e recrie o elemento DOM, mantendo a animação fluida.
+// --- LÓGICA DE RECONCILIAÇÃO INTELIGENTE E ORDENADA ---
+// Mantém os IDs antigos para animação fluida E mantém a ordem local das cartas.
 fn atualizar_mao_preservando_ids(
     state: GameState,
     nova_mao_server: Vec<buracao_core::baralho::Carta>,
 ) -> Vec<CartaIdentificada> {
-    let mao_atual = state.minha_mao.get_untracked();
-    let mut nova_mao_identificada = Vec::new();
+    let mao_local = state.minha_mao.get_untracked();
+    let mut nova_mao = Vec::new();
 
-    // Pool de cartas existentes para tentar reutilizar IDs
-    let mut pool: Vec<CartaIdentificada> = mao_atual;
+    // Lista de cartas que o servidor diz que temos.
+    // Vamos riscando os itens dessa lista conforme os encontramos na mão local.
+    let mut pendencias_do_servidor = nova_mao_server.clone();
 
-    for carta_server in nova_mao_server {
-        // Verifica se já temos essa carta na mão local (comparação por valor/naipe)
-        if let Some(idx) = pool.iter().position(|c| c.carta == carta_server) {
-            // Achou! Remove do pool para evitar duplicatas e reusa o objeto com ID antigo
-            nova_mao_identificada.push(pool.remove(idx));
-        } else {
-            // Carta nova (ex: acabou de comprar): Gera um ID visual novo
-            let novo_id = state.unique_card_counter.get_untracked() + 1;
-            state.unique_card_counter.set(novo_id);
-
-            nova_mao_identificada.push(CartaIdentificada {
-                id: novo_id,
-                carta: carta_server,
-            });
+    // 1. Percorre a mão local atual para preservar a ORDEM e os IDs originais
+    for carta_identificada in mao_local {
+        // Verifica se essa carta local ainda existe na visão do servidor
+        if let Some(idx) = pendencias_do_servidor
+            .iter()
+            .position(|c| *c == carta_identificada.carta)
+        {
+            // A carta existe! Mantemos ela na nova mão (na mesma posição local e com o mesmo ID)
+            nova_mao.push(carta_identificada);
+            // Removemos da lista de pendências para não duplicar
+            pendencias_do_servidor.remove(idx);
         }
     }
 
-    nova_mao_identificada
+    // 2. Tudo que sobrou em 'pendencias_do_servidor' são cartas NOVAS (ex: comprou do monte/lixo)
+    // Adicionamos elas ao final da mão gerando um novo ID visual
+    let mut current_id = state.unique_card_counter.get_untracked();
+
+    for carta_nova in pendencias_do_servidor {
+        current_id += 1;
+        nova_mao.push(CartaIdentificada {
+            id: current_id,
+            carta: carta_nova,
+        });
+    }
+
+    // Atualiza o contador de IDs no estado global
+    state.unique_card_counter.set(current_id);
+
+    nova_mao
 }
 
 /// Processa a mensagem recebida e atualiza os sinais do GameState
@@ -251,6 +263,9 @@ fn processar_mensagem(state: GameState, msg: MsgServidor) {
             state.ajuntes_lixo_preparados.set(Vec::new());
             state.lixo_selecionado.set(false);
 
+            // GARANTE QUE A TELA DE GAME OVER FECHE AO COMEÇAR NOVA PARTIDA
+            state.show_game_over.set(false);
+
             state.qtd_monte.set(monte_novo);
             state.qtd_lixo.set(visao.qtd_lixo);
             state
@@ -310,10 +325,29 @@ fn processar_mensagem(state: GameState, msg: MsgServidor) {
                 }
             });
         }
-        MsgServidor::FimDeJogo { vencedor_time, .. } => {
+        MsgServidor::FimDeJogo {
+            vencedor_time,
+            pontos_a,
+            pontos_b,
+            motivo,
+        } => {
+            // Atualiza placar visualmente
+            state.pontuacao_a.set(pontos_a);
+            state.pontuacao_b.set(pontos_b);
+
+            // Abre o modal
             state
-                .status_jogo
-                .set(format!("Vencedor: Time {}", vencedor_time));
+                .game_over_data
+                .set(Some((vencedor_time, pontos_a, pontos_b, motivo)));
+            state.show_game_over.set(true);
+
+            // Toca som de vitória se for meu time
+            let meu_time = state.meu_id.get_untracked() % 2;
+            if (meu_time as u8) == vencedor_time {
+                // Se tiver um som de vitória, toque aqui
+                add_toast(state, "VITÓRIA DA RODADA!".to_string(), ToastType::Info);
+            }
+
             state.selected_ids.update(|s| s.clear());
         }
     }

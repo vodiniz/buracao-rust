@@ -186,17 +186,49 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
                         .cloned()
                         .unwrap_or_else(|| format!("Jogador {}", my_player_id));
 
+                    let (pts_a, pts_b) = (room.game_state.pontuacao_a, room.game_state.pontuacao_b);
+
+                    // 1. AVALIAÇÃO DO FIM DO JOGO (SÓ MANDA A TELA SE TIVER 5000+)
+                    if pts_a >= 5000 || pts_b >= 5000 {
+                        let time_vencedor = if pts_a >= pts_b { 0 } else { 1 };
+
+                        let msg_fim = MsgServidor::FimDeJogo {
+                            vencedor_time: time_vencedor,
+                            pontos_a: pts_a,
+                            pontos_b: pts_b,
+                            motivo: "Pontuação máxima atingida!".to_string(),
+                        };
+
+                        // Se atingiu 5000, envia o modal para a tela de todos
+                        if let Ok(json) = serde_json::to_string(&msg_fim) {
+                            for client_tx in room.clients.values() {
+                                let _ = client_tx.send(Message::text(json.clone()));
+                            }
+                        }
+                    }
+
+                    // 2. BROADCAST DE BATIDA NA RODADA (Sempre acontece, via Game Log)
                     println!("🏆 {} BATEU! Iniciando contagem...", nome_vencedor);
 
                     let room_clone_timer = room_ref.clone();
+                    let nome_vencedor_log = nome_vencedor.clone();
 
                     tokio::spawn(async move {
-                        broadcast_msg(
-                            &room_clone_timer,
-                            format!("🏆 {} BATEU! Reiniciando em 15s...", nome_vencedor),
-                        )
-                        .await;
+                        let alguem_bateu = {
+                            let r = room_clone_timer.read().await;
+                            r.game_state.maos.iter().any(|mao| mao.is_empty())
+                        };
 
+                        let mensagem_alerta = if alguem_bateu {
+                            format!("🏆 {} BATEU! Reiniciando em 15s...", nome_vencedor_log)
+                        } else {
+                            "📭 O BARALHO ESGOTOU! Reiniciando em 15s...".to_string()
+                        };
+
+                        // Aviso inicial
+                        broadcast_msg(&room_clone_timer, mensagem_alerta).await;
+
+                        // Contagem Regressiva
                         for i in (1..=15).rev() {
                             broadcast_msg(
                                 &room_clone_timer,
@@ -207,12 +239,16 @@ pub async fn handle_connection(ws: WebSocket, global_state: GlobalState) {
                             tokio::time::sleep(Duration::from_secs(1)).await;
                         }
 
+                        // Reset Final
                         broadcast_msg(&room_clone_timer, "🔄 REINICIANDO AGORA!".to_string()).await;
 
                         {
                             let mut r = room_clone_timer.write().await;
+
+                            // O Core decide se zera pontos (5000) ou só começa nova rodada
                             r.game_state.resetar_jogo();
 
+                            // Manda o novo estado (cartas limpas) para todos
                             for (pid, client_tx) in r.clients.iter() {
                                 let visao = r.game_state.gerar_visao_para_jogador(*pid);
                                 let envelope = MsgServidor::Estado(visao);

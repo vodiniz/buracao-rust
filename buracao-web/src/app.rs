@@ -9,6 +9,7 @@ use crate::game::state::GameState;
 // Componentes
 use crate::components::board::Board;
 use crate::components::controls::GameControls;
+use crate::components::game_over::GameOverModal;
 use crate::components::hand::Hand;
 use crate::components::log::GameLog;
 use crate::components::login::LoginScreen;
@@ -195,6 +196,13 @@ pub fn App() -> impl IntoView {
                         on_close=Callback::new(move |_| state.show_history.set(false))
                     />
                 </Show>
+
+                <GameOverModal
+                    show=state.show_game_over
+                    data=state.game_over_data
+                    my_id=state.meu_id
+                    nomes=state.mapa_nomes
+                />
 
                 <SettingsModal
                     show=state.show_settings

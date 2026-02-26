@@ -1,6 +1,7 @@
 pub mod board;
 pub mod card;
 pub mod controls;
+pub mod game_over;
 pub mod hand;
 pub mod log;
 pub mod login;

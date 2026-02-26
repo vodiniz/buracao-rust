@@ -47,7 +47,6 @@ pub fn Hand(
             .card-shake {
                 animation: shakeCard 0.4s ease-in-out;
                 filter: sepia(1) hue-rotate(-50deg) saturate(3);
-                /* Forçamos opacidade 1 para garantir que não suma na troca de classe */
                 opacity: 1 !important; 
             }
             "
@@ -55,7 +54,6 @@ pub fn Hand(
     };
 
     // --- LÓGICA DE SHAKE GLOBAL ---
-    // Monitora o sinal do pai e ativa o estado local de shake
     let (is_shaking, set_shaking) = signal(false);
 
     if let Some(trigger) = shake_trigger {
@@ -71,31 +69,41 @@ pub fn Hand(
         });
     }
 
-    // --- DRAG & DROP (Mantido) ---
-    let (dragged_idx, set_dragged_idx) = signal(Option::<usize>::None);
-    let handle_drag_start = move |ev: web_sys::DragEvent, idx: usize| {
-        set_dragged_idx.set(Some(idx));
+    // --- DRAG & DROP (CORRIGIDO PARA USAR ID) ---
+    // Agora guardamos o ID da carta arrastada, não sua posição defasada
+    let (dragged_id, set_dragged_id) = signal(Option::<u32>::None);
+
+    let handle_drag_start = move |ev: web_sys::DragEvent, id: u32| {
+        set_dragged_id.set(Some(id));
         if let Some(dt) = ev.data_transfer() {
             dt.set_effect_allowed("move");
         }
     };
+
     let handle_drag_over = move |ev: web_sys::DragEvent| ev.prevent_default();
-    let handle_drop = move |ev: web_sys::DragEvent, target_idx: usize| {
+
+    let handle_drop = move |ev: web_sys::DragEvent, target_id: u32| {
         ev.prevent_default();
-        if let Some(source_idx) = dragged_idx.get() {
-            if source_idx != target_idx {
+        if let Some(source_id) = dragged_id.get() {
+            if source_id != target_id {
                 cartas.update(|c| {
-                    if source_idx < c.len() && target_idx < c.len() {
-                        let carta = c.remove(source_idx);
-                        c.insert(target_idx, carta);
+                    // Busca a posição REAL e ATUALIZADA das duas cartas neste exato momento
+                    let src_idx = c.iter().position(|item| item.id == source_id);
+                    let tgt_idx = c.iter().position(|item| item.id == target_id);
+
+                    if let (Some(s), Some(t)) = (src_idx, tgt_idx) {
+                        let carta = c.remove(s);
+                        c.insert(t, carta);
                     }
                 });
-                selected_ids.update(|s| s.clear());
+                // Opcional: Descomente a linha abaixo se quiser que a seleção limpe ao arrastar
+                // selected_ids.update(|s| s.clear());
             }
         }
-        set_dragged_idx.set(None);
+        set_dragged_id.set(None);
     };
 
+    // --- SELEÇÃO DE CARTAS ---
     let toggle_selection = move |id: u32| {
         selected_ids.update(|set| {
             if set.contains(&id) {
@@ -110,13 +118,10 @@ pub fn Hand(
         {styles}
         <div style="display: flex; justify-content: center; padding: 20px; overflow-x: auto; min-height: 160px;">
             <For
-                each=move || cartas.get().into_iter().enumerate()
-                // Usamos o ID único visual como chave.
-                // Se a carta muda de índice (drag), o ID não muda, então o DOM é preservado.
-                key=|(i, item)| item.id
-
-                children=move |(index, item)| {
-                    // Lógica de entrada temporária (mantida para compras novas)
+                // Removido o enumerate() para não pegarmos índices defasados
+                each=move || cartas.get()
+                key=|item| item.id
+                children=move |item| {
                     let (is_entering, set_entering) = signal(true);
                     set_timeout(move || { set_entering.set(false); }, std::time::Duration::from_millis(400));
 
@@ -128,7 +133,6 @@ pub fn Hand(
                     let theme_str = theme.clone();
                     let width_signal = card_width;
 
-
                     view! {
                         <div
                             class=move || {
@@ -137,16 +141,16 @@ pub fn Hand(
                                 if is_shaking.get() && is_selected() { classes.push_str(" card-shake"); }
                                 classes
                             }
-                            // Usamos with para acessar tamanho sem clonar
                         >
                             <Card
                                 id=carta_para_asset(&carta_real)
                                 width=width_signal
                                 theme=theme_str
                                 draggable=true
-                                on_drag_start=Some(Callback::new(move |e| handle_drag_start(e, index)))
+                                // Passamos sempre o id_atual para garantir consistência
+                                on_drag_start=Some(Callback::new(move |e| handle_drag_start(e, id_atual)))
                                 on_drag_over=Some(Callback::new(handle_drag_over))
-                                on_drop=Some(Callback::new(move |e| handle_drop(e, index)))
+                                on_drop=Some(Callback::new(move |e| handle_drop(e, id_atual)))
                                 selection_group=Signal::derive(selection_state)
                                 on_click=Some(Callback::new(move |_: web_sys::MouseEvent| toggle_selection(id_atual)))
                             />

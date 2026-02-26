@@ -770,8 +770,21 @@ impl EstadoJogo {
 
         match acao {
             AcaoJogador::ComprarBaralho => {
-                let carta = self.comprar_carta(id_jogador as usize)?;
-                Ok(format!("Você comprou do baralho: {}", carta))
+                // CORREÇÃO: Tratamos o retorno para não propagar o erro se o jogo acabou
+                match self.comprar_carta(id_jogador as usize) {
+                    Ok(carta) => Ok(format!("Você comprou do baralho: {}", carta)),
+                    Err(e) => {
+                        // Se o baralho esgotou, o estado FOI alterado (partida_encerrada = true).
+                        // Precisamos retornar Ok() para o handler atualizar a mesa e iniciar o timer.
+                        if self.partida_encerrada {
+                            Ok("O baralho acabou. Fim de jogo!".to_string())
+                        } else if self.baralho_acabou_nesta_rodada {
+                            Ok("O baralho acabou! Última chance no lixo.".to_string())
+                        } else {
+                            Err(e) // Erros reais: "já comprou", etc.
+                        }
+                    }
+                }
             }
 
             AcaoJogador::ComprarLixo {
@@ -910,31 +923,56 @@ impl EstadoJogo {
     }
 
     pub fn resetar_jogo(&mut self) {
-        println!("🔄 Resetando jogo (Modo Padrão)...");
+        // 1. Verifica se alguém atingiu a pontuação de vitória (5000)
+        let limite_vitoria = 5000;
+        let fim_de_campeonato =
+            self.pontuacao_a >= limite_vitoria || self.pontuacao_b >= limite_vitoria;
 
+        if fim_de_campeonato {
+            println!(
+                "🏆 FIM DE JOGO! ({} vs {}) - Iniciando NOVA PARTIDA.",
+                self.pontuacao_a, self.pontuacao_b
+            );
+
+            // ZERA TUDO
+            self.pontuacao_a = 0;
+            self.pontuacao_b = 0;
+            self.historico_pontos_a.clear();
+            self.historico_pontos_b.clear();
+            self.numero_partida = 0; // Reinicia o contador de partidas
+        } else {
+            println!("🔄 Próxima rodada (Partida {})...", self.numero_partida + 1);
+            // APENAS AVANÇA
+            self.numero_partida += 1;
+        }
+
+        // 2. Limpeza padrão da mesa (acontece em ambos os casos)
         self.jogos_time_a.clear();
         self.jogos_time_b.clear();
-
         self.tres_vermelhos_time_a.clear();
         self.tres_vermelhos_time_b.clear();
-
         self.lixo.clear();
         self.maos.clear();
 
+        // 3. Novo Baralho
         self.baralho = Baralho::new();
-        self.numero_partida += 1;
+
+        // Define quem dá as cartas (mão) baseado no número da partida
+        // Rodada 0: Jogador 0
+        // Rodada 1: Jogador 1 ...
         self.turno_atual = self.numero_partida % 4;
 
         self.dar_cartas();
 
+        // 4. Reseta flags de turno
         self.rodada = 0;
         self.comprou_nesta_rodada = false;
         self.pegou_lixo_nesta_rodada = false;
-
         self.partida_encerrada = false;
         self.proximo_id_jogo += 1;
         self.baralho_acabou_nesta_rodada = false;
-        self.comprou_nesta_rodada = false;
+
+        // 5. Atualiza metadados visuais
         self.qtd_monte = self.baralho.cartas.len() as u32;
         self.qtd_lixo = 0;
         self.verso_topo = self.baralho.cartas.last().map(|c| c.verso);

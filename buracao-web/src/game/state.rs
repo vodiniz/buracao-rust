@@ -49,6 +49,10 @@ pub struct GameState {
     pub mapa_nomes: RwSignal<HashMap<u32, String>>,
     pub qtd_cartas_jogadores: RwSignal<Vec<usize>>,
 
+    // --- FIM DE JOGO ---
+    pub show_game_over: RwSignal<bool>,
+    pub game_over_data: RwSignal<Option<(u8, i32, i32, String)>>, // (Time Vencedor, Pts A, Pts B, Motivo)
+
     // --- ESTADO LOCAL (Interface) ---
     pub lixo_selecionado: RwSignal<bool>,
     pub selected_ids: RwSignal<HashSet<u32>>,
@@ -131,6 +135,10 @@ impl GameState {
             verso_monte: RwSignal::new("back_r".to_string()),
             mapa_nomes: RwSignal::new(HashMap::new()),
             qtd_cartas_jogadores: RwSignal::new(Vec::new()),
+
+            // Fim de Jogo
+            show_game_over: RwSignal::new(false),
+            game_over_data: RwSignal::new(None),
 
             // Local
             lixo_selecionado: RwSignal::new(false),

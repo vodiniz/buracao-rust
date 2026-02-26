@@ -203,7 +203,7 @@ impl GameActions {
         }
 
         let meu_id = self.state.meu_id.get();
-        let sou_time_a = meu_id % 2 == 0;
+        let sou_time_a = meu_id.is_multiple_of(2);
 
         let id_jogo_real = if sou_time_a {
             self.state
